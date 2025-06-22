@@ -1,7 +1,7 @@
 import base64
 import hashlib
-import json
 import time
+import json
 import asyncio
 from urllib import parse
 import re
@@ -12,8 +12,19 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from enum import StrEnum, IntEnum
 
-
 T = TypeVar("T")
+
+
+def is_balanced(s: str) -> bool:
+    s = re.sub(r"[^\{\}\[\]\(\)]", "", s)
+
+    pairs = ["()", "{}"]
+
+    for pair in pairs:
+        while pair in s:
+            s = s.replace(pair, "")
+
+    return not s
 
 
 class ResolverFlags(IntEnum):
@@ -48,7 +59,7 @@ class Patterns(StrEnum):
 
     SLICES = rf"case\s(\d{{1,2}}):{_FUNC2}\({_FUNC2}\(\),[\w$]{{3}},{_FUNC2}\({_FUNC2}\([\w$]{{3}},([\d\-]+),[\d\-]+\),[\d\-]+,([\d\-]+)\)\)"
 
-    _GET1_INDEX = r'+?"?(\w+)"?( [|\-\+*><^]+ "?\w+"?)?'
+    _GET1_INDEX = r'+?"?([\w$]+)"?( [|\-\+*><^]+ "?[\w$]+"?)?'
     GET1 = rf"{_FUNC}\(\{_GET1_INDEX}\)"
     GET2 = rf'{_FUNC}\({_FUNC}\("?(\w+)"?,"?(\w+)"?\)\)'
     GET3 = rf'{_FUNC}\({_FUNC}\("?(\w+)"?,"?(\w+)"?,{SET_DEF_FLAG}\)\)'
@@ -58,18 +69,17 @@ class Patterns(StrEnum):
     INDEX_ARRAY_ITEM = rf'({_FUNC}\([\w",\(\)]+\))|({_FUNC}\("?\d+"?,"?\d+"?,{_FUNC}\(\d+\)\))|(\d+)'
 
     KEY_ARRAY_CONTENT = rf'\w=\[((?!arguments)[\w\d.$\(\)",+]+)\];'
-    KEY_VAR = rf'var [\w$,]{{28,}};(?:{_FUNC}\(\+?"?\d+"?\);)?[\w$]+=([\w$.\(\)\+,"]+);'
+    KEY_VAR = rf'var (?:[\w$]{{1,2}},?){{28,}};(?:{_FUNC}\(\+?"?\d+"?\);)?[\w$]+=([\w$.\(\)\+,"]+);'
 
-    KEYGEN = r"var [\w$,]{28,};.+?\w=\(\)=>{(.+?)};"
     MAP = r"\((\w)=>{(.+?return.+?;)"
 
-    PARSE_INT = r'\w+\({},\+?"16"?\)'
-    BITWISE2 = rf"{_FUNC}\((\w),(\w\))"
+    PARSE_INT = r'[\w$]+\({},\+?"?16"?'
+    BITWISE2 = rf"{_FUNC}\((\w),(\w)\)"
     BITWISE3 = rf'{_FUNC}\("?(\d+)"?,"?(\d+)"?,{_FUNC}\((\d)\)\)'
 
-    GET_KEY = r"var [\w$,]{28,};(.+?)try"
+    GET_KEY = r"var (?:[\w$]{1,2},?){28,};(.+?)try"
     GET_KEY_FUNC = r"(\w)=\(\)=>{(.+?)};"
-    GET_KEY_FUNC_RETURN = r"\w=\(\)=>{.+?return(.+?);[\}\)]"
+    GET_KEY_FUNC_RETURN = r"return(.+?);[\}\)]"
 
     DICT_SET1 = rf"[\w$]{{2}}\[(?:{GET})\]=({GET})"
     DICT_SET2 = rf"[\w$]{{2}}\[(?:{GET})\]=\(\)=>({{.+?return {GET})"
@@ -86,15 +96,37 @@ class Resolvers:
 
     @staticmethod
     def _get_keys(s: "Megacloud") -> list[str]:
-        key_array_items = _re(Patterns.KEY_ARRAY_CONTENT, s.script, l=True)[0]
-        func_calls = re.split(r"(?<=\)),(?=\w)", key_array_items)
-
+        array_items = _re(Patterns.KEY_ARRAY_CONTENT, s.script, l=True)[0]
+        array_items = re.split(r"(?<=\)),(?=\w)", array_items)
         keys = []
-        for fcall in func_calls:
+
+        if any(i.isdigit() for i in array_items) or len(array_items) % 32 != 0:
+            return keys
+        #
+        for fcall in array_items:
             args = _re(Patterns.GET, fcall, l=False).groups()
             keys.append(s._get(args[1:], ""))
 
         return keys
+
+    @staticmethod
+    def _get_indexes(s: "Megacloud") -> list[int]:
+        array_items = _re(Patterns.INDEX_ARRAY_CONTENT, s.script, l=True)[-1]
+        array_items = _re(Patterns.INDEX_ARRAY_ITEM, array_items, l=True)
+        indexes = []
+
+        if not any(any(ii.isdigit() for ii in i) for i in array_items) or len(array_items) % 32 != 0:
+            return indexes
+
+        for m in array_items:
+            idx = m[0] or m[1] or m[2]
+
+            if not idx.isdigit():
+                idx = _re(Patterns.IDX, idx, l=False).group(1)
+
+            indexes.append(int(idx))
+
+        return indexes
 
     @classmethod
     def slice(cls, s: "Megacloud") -> tuple[list, list]:
@@ -137,17 +169,33 @@ class Resolvers:
         return list(key), list(range(0, len(key)))
 
     @classmethod
+    def add_funcs(cls, s: "Megacloud") -> tuple[list, list]:
+        get_key = _re(Patterns.GET_KEY, s.script, l=False).group(1)
+        funcs = _re(Patterns.GET_KEY_FUNC, get_key, l=True)
+
+        if len(funcs) < 3:
+            return [], []
+
+        key = ""
+
+        for f in funcs[:-1]:
+            ret = _re(Patterns.GET_KEY_FUNC_RETURN, f[1], l=False).group(1)
+            args = _re(Patterns.GET, ret, l=False).groups()
+
+            key += s._get(args[1:], f[1])
+
+        return list(key), list(range(0, len(key)))
+
+    @classmethod
     def map(cls, s: "Megacloud") -> tuple[list, list]:
         try:
             keys = cls._get_keys(s)
         except ValueError as e:
-            print(f"keys not found: {e}")
             keys = []
 
         try:
-            indexes = s._get_indexes()
+            indexes = cls._get_indexes(s)
         except ValueError as e:
-            print(f"indexes not found: {e}")
             indexes = []
 
         return keys, indexes
@@ -160,12 +208,13 @@ class Resolvers:
             map_ = _re(Patterns.MAP, s.script, l=False)
             map_arg = map_.group(1)
             map_body = map_.group(2)
+
             if m := re.search(Patterns.BITWISE2, map_body):
                 flag = _re(Patterns.SET_DEF_FLAG, map_body, l=False).group(1)
                 func = s.bitwise[int(flag)]
 
                 var_name = m.group(1) if m.group(1) != map_arg else m.group(2)
-                var_value = _re(Patterns.VAR.format(name=var_name), s.script, l=False).group(1)
+                var_value = s._var_to_num(var_name, map_body)
 
                 raw_values = [func(int(var_value), int(i)) for i in indexes]
 
@@ -181,19 +230,20 @@ class Resolvers:
             #     ...
 
         else:
-            indexes = s._get_indexes()
+            indexes = cls._get_indexes(s)
             raw_values = [int(i) for i in indexes]
 
         return [chr(v) for v in raw_values], list(range(0, len(raw_values)))
 
     @classmethod
     def fallback(cls, s: "Megacloud") -> tuple[list, list]:
-        to_try = [cls.slice, cls.map, cls.from_charcode]
+        to_try = [cls.slice, cls.add_funcs, cls.from_charcode]
+        # to_try = [cls.cmd]
 
         for t in to_try:
             try:
                 return t(s)
-            except ValueError:
+            except ValueError as e:
                 continue
 
         else:
@@ -207,7 +257,6 @@ class Resolvers:
 
         if flags & ResolverFlags.MAP:
             keys, indexes = cls.map(s)
-            print(keys, indexes)
 
         if flags & (ResolverFlags.SLICE | ResolverFlags.SPLIT):
             keys, indexes = cls.slice(s)
@@ -215,11 +264,11 @@ class Resolvers:
         if flags & ResolverFlags.FROMCHARCODE:
             keys, indexes = cls.from_charcode(s, keys, indexes)
 
-        if flags & ResolverFlags.FALLBACK:
-            keys, indexes = cls.fallback(s)
-
         if flags & ResolverFlags.ABC:
             keys, indexes = cls.abc(s)
+
+        if flags & ResolverFlags.FALLBACK:
+            keys, indexes = cls.fallback(s)
 
         key = "".join(keys[i] for i in indexes)
 
@@ -236,12 +285,12 @@ async def make_request(url: str, headers: dict, params: dict, func: Callable[[ai
 
 
 @overload
-def _re(pattern: Patterns | str, string: str, *, l: Literal[True]) -> list[str]: ...
+def _re(pattern: Patterns | str, string: str, *, l: Literal[True]) -> list: ...
 @overload
 def _re(pattern: Patterns | str, string: str, *, l: Literal[False]) -> re.Match: ...
 
 
-def _re(pattern: Patterns | str, string: str, *, l: bool) -> re.Match | list[str]:
+def _re(pattern: Patterns | str, string: str, *, l: bool) -> re.Match | list:
     if l:
         v = re.findall(pattern, string)
 
@@ -298,7 +347,7 @@ class Megacloud:
     headers = {
         "user-agent": "Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0",
         "origin": base_url,
-        "referer": base_url,
+        "referer": base_url + "/",
     }
 
     def __init__(self, embed_url: str) -> None:
@@ -341,33 +390,50 @@ class Megacloud:
 
         return array
 
+    def _get_flags(self, ctx: str) -> list[int]:
+        try:
+            flags = _re(Patterns.SET_DEF_FLAG, ctx, l=True)
+            flag = list(filter(lambda i: i <= 15, map(int, flags)))
+
+        except ValueError:
+            flag = [0]
+
+        return flag
+
+    def _calc_bitwise(self, args: tuple, ctx: str) -> int:
+        for f in self._get_flags(ctx):
+            try:
+                v = self.bitwise[f](*args)
+
+            except IndexError:
+                continue
+
+            if v in range(0, len(self.string_array)):
+                return v
+
+        raise ValueError
+
+    def _var_to_num(self, var: str, ctx: str) -> str:
+        if not var.isdigit():
+            var = var.replace("$", r"\$")
+
+            bitwise_args = _re(Patterns.VAR.format(name=var), self.script, l=False)
+            bitwise_args = bitwise_args.group(1) or bitwise_args.group(2)
+            bitwise_args = tuple(map(int, re.findall(r"(\d+)", bitwise_args)))
+
+            return str(self._calc_bitwise(bitwise_args, ctx))
+
+        return var
+
     def _get(self, values, ctx: str) -> str:
         values = list(filter(None, values))
-
-        def get_flag() -> int:
-            try:
-                flag = _re(Patterns.SET_DEF_FLAG, ctx, l=False).group(1)
-                flag = int(flag[0])
-
-            except ValueError:
-                flag = 0
-
-            return flag
 
         if len(values) == 1 or not values[1].isdigit():
             if len(values) == 2:
                 expression = values[-1].split()
 
                 operator = expression[0]
-                operand = expression[-1]
-
-                if not operand.isdigit():
-                    bitwise_args = _re(Patterns.VAR.format(name=operand), self.script, l=False).groups()
-                    bitwise_args = bitwise_args[0] or bitwise_args[1]
-                    bitwise_args = map(int, re.findall(r"(\d+)", bitwise_args))
-
-                    flag = get_flag()
-                    operand = str(self.bitwise[flag](*bitwise_args))
+                operand = self._var_to_num(expression[-1], ctx)
 
                 if any(i in operator for i in (">", "<")):
                     operand = f"({operand} & 31)"
@@ -376,16 +442,21 @@ class Megacloud:
                 i = eval("".join(values))
 
             else:
-                i = int(values[0])
+                i = int(self._var_to_num(values[0], ctx))
 
             v = self.string_array[i]
 
         elif len(values) > 1:
-            i1 = int(values[0])
-            i2 = int(values[1])
-            flag = int(values[2]) if len(values) == 3 else get_flag()
+            i1 = int(self._var_to_num(values[0], ctx))
+            i2 = int(self._var_to_num(values[1], ctx))
 
-            i = self.bitwise[flag](i1, i2)
+            if len(values) == 3:
+                flag = int(self._var_to_num(values[2], ctx))
+                i = self.bitwise[flag](i1, i2)
+
+            else:
+                i = self._calc_bitwise((i1, i2), ctx)
+
             v = self.string_array[i]
 
         else:
@@ -393,30 +464,15 @@ class Megacloud:
 
         return v
 
-    def _get_indexes(self) -> list[int]:
-        indexes = []
-        array_items = _re(Patterns.INDEX_ARRAY_CONTENT, self.script, l=True)[-1]
-        for m in _re(Patterns.INDEX_ARRAY_ITEM, array_items, l=True):
-            idx = m[0] or m[1] or m[2]
-
-            if not idx.isdigit():
-                idx = _re(Patterns.IDX, idx, l=False).group(1)
-
-            indexes.append(int(idx))
-
-        return indexes
-
     def _resolve_key(self) -> bytes:
-        keygen_func = _re(Patterns.KEYGEN, self.script, l=False)
-        keygen_body = keygen_func.group(1)
+        get_key = _re(Patterns.GET_KEY, self.script, l=False).group(1)
+        get_key_body = _re(Patterns.GET_KEY_FUNC, get_key, l=False).group(2)
 
         functions: list[str] = []
-        print(keygen_body)
 
-        for i in re.findall(Patterns.GET, keygen_body):
-            functions.append(self._get(i[1:], keygen_body))
+        for i in re.findall(Patterns.GET, get_key_body):
+            functions.append(self._get(i[1:], get_key_body))
 
-        print(functions)
         flags = 0
 
         for f in functions:
@@ -478,7 +534,7 @@ class Megacloud:
 
 
 async def main():
-    url = "https://megacloud.blog/embed-2/v2/e-1/HakXnbHZZUiV?k=1&autoPlay=1&oa=0&asi=1"
+    url = "https://megacloud.blog/embed-2/v2/e-1/BjcUa32ldHa5?k=1&autoPlay=1&oa=0&asi=1"
     a = Megacloud(url)
     print(json.dumps(await a.extract(), indent=4))
 
