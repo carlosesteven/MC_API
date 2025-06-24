@@ -100,7 +100,7 @@ class Resolvers:
         array_items = re.split(r"(?<=\)),(?=\w)", array_items)
         keys = []
 
-        if any(i.isdigit() for i in array_items) or len(array_items) % 32 != 0:
+        if any(i.isdigit() for i in array_items) or len(array_items) % 16 != 0:
             return keys
         #
         for fcall in array_items:
@@ -115,7 +115,7 @@ class Resolvers:
         array_items = _re(Patterns.INDEX_ARRAY_ITEM, array_items, l=True)
         indexes = []
 
-        if not any(any(ii.isdigit() for ii in i) for i in array_items) or len(array_items) % 32 != 0:
+        if not any(any(ii.isdigit() for ii in i) for i in array_items) or len(array_items) % 16 != 0:
             return indexes
 
         for m in array_items:
