@@ -69,7 +69,7 @@ class Patterns(StrEnum):
     INDEX_ARRAY_ITEM = rf'({_FUNC}\([\w",\(\)]+\))|({_FUNC}\("?\d+"?,"?\d+"?,{_FUNC}\(\d+\)\))|(\d+)'
 
     KEY_ARRAY_CONTENT = rf'\w=\[((?!arguments)[\w\d.$\(\)",+]+)\];'
-    KEY_VAR = r'var (?:[\w$]{1,2},?){28,};.+?[\w$]+=([\w$.\(\)\+,"]+)'
+    KEY_VAR = r"var (?:[\w$]{1,2},){28,}.+?[\w$\.]+=([^;]+?);"
 
     MAP = r"\((\w)=>{(.+?return.+?;)"
 
@@ -534,7 +534,7 @@ class Megacloud:
 
 
 async def main():
-    url = "https://megacloud.blog/embed-2/v2/e-1/1LOb5DcyM3cE?k=1&autoPlay=1&oa=0&asi=1"
+    url = "	https://megacloud.blog/embed-2/v2/e-1/cTc4e3yDHn2k?k=1&autoPlay=1&oa=0&asi=1"
     a = Megacloud(url)
     print(json.dumps(await a.extract(), indent=4))
 
