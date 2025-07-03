@@ -7,7 +7,7 @@ from urllib import parse
 import re
 import aiohttp
 
-from typing import Awaitable, Callable, TypeVar, overload, Literal
+from typing import Awaitable, Callable, Iterable, TypeVar, overload, Literal
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from enum import StrEnum, IntEnum
@@ -184,7 +184,7 @@ class Resolvers:
     def map(cls, s: "Megacloud") -> tuple[list, list]:
         try:
             keys = cls._get_keys(s)
-        except ValueError:
+        except ValueError as e:
             keys = []
 
         try:
@@ -208,7 +208,7 @@ class Resolvers:
                 func = s.bitwise[int(flag)]
 
                 var_name = m.group(1) if m.group(1) != map_arg else m.group(2)
-                var_value = s._var_to_num(var_name, map_body)
+                var_value = s._var_to_num(var_name, s.script)
 
                 raw_values = [func(int(var_value), int(i)) for i in indexes]
 
@@ -219,9 +219,6 @@ class Resolvers:
 
             if _re(Patterns.PARSE_INT.fmt(map_arg), map_body, default=None):
                 raw_values = [int(k, 16) for k in keys]
-
-            # elif m := re.search(bitwise3_pattern, map_body):
-            #     ...
 
         else:
             indexes = cls._get_indexes(s)
@@ -392,7 +389,9 @@ class Megacloud:
 
         return flag
 
-    def _calc_bitwise(self, args: tuple, ctx: str) -> int:
+    def _calc_bitwise(self, args: Iterable, ctx: str) -> int:
+        args = map(int, args)
+
         for f in self._get_flags(ctx):
             try:
                 v = self.bitwise[f](*args)
@@ -403,17 +402,20 @@ class Megacloud:
             if v in range(0, len(self.string_array)):
                 return v
 
-        raise ValueError
+        raise ValueError(f"wrong bitwise args")
 
     def _var_to_num(self, var: str, ctx: str) -> str:
         if not var.isdigit():
             var = var.replace("$", r"\$")
 
-            bitwise_args = _re(Patterns.VAR.fmt(name=var), self.script)
-            bitwise_args = bitwise_args.group(1) or bitwise_args.group(2)
-            bitwise_args = tuple(map(int, re.findall(r"(\d+)", bitwise_args)))
+            var_value = _re(Patterns.VAR.fmt(name=var), self.script)
+            var_value = var_value.group(1) or var_value.group(2)
+            var_value = re.findall(r"(\d+)", var_value)
 
-            return str(self._calc_bitwise(bitwise_args, ctx))
+            if len(var_value) == 1:
+                return str(var_value[0])
+
+            return str(self._calc_bitwise(var_value, ctx))
 
         return var
 
