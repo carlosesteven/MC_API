@@ -15,26 +15,12 @@ from enum import StrEnum, IntEnum
 T = TypeVar("T")
 
 
-def is_balanced(s: str) -> bool:
-    s = re.sub(r"[^\{\}\[\]\(\)]", "", s)
-
-    pairs = ["()", "{}"]
-
-    for pair in pairs:
-        while pair in s:
-            s = s.replace(pair, "")
-
-    return not s
-
-
 class ResolverFlags(IntEnum):
-    MAP = 1 << 0
     REVERSE = 1 << 1
     FROMCHARCODE = 1 << 2
     SLICE = 1 << 3
     SPLIT = 1 << 4
     ABC = 1 << 5
-    FALLBACK = 1 << 6
 
 
 class Patterns(StrEnum):
@@ -85,34 +71,42 @@ class Patterns(StrEnum):
     DICT_SET2 = rf"[\w$]{{2}}\[(?:{GET})\]=\(\)=>({{.+?return {GET})"
     DICT_SET = f"{DICT_SET1}|{DICT_SET2}"
 
+    def fmt(self, *args, **kwargs) -> "Patterns":
+        self._fmted = self.value.format(*args, **kwargs)
+        return self
+
+    @property
+    def formatted(self) -> str:
+        return getattr(self, "_fmted", self.value)
+
 
 class Resolvers:
     @staticmethod
     def _get_key(s: "Megacloud") -> str:
-        fcall = _re(Patterns.KEY_VAR, s.script, l=False).group(1)
-        args = _re(Patterns.GET, fcall, l=False).groups()
+        fcall = _re(Patterns.KEY_VAR, s.script).group(1)
+        args = _re(Patterns.GET, fcall).groups()
 
         return s._get(args[1:], fcall).replace("-", "")
 
     @staticmethod
     def _get_keys(s: "Megacloud") -> list[str]:
-        array_items = _re(Patterns.KEY_ARRAY_CONTENT, s.script, l=True)[0]
+        array_items = _re(Patterns.KEY_ARRAY_CONTENT, s.script, all=True)[0]
         array_items = re.split(r"(?<=\)),(?=\w)", array_items)
         keys = []
 
         if any(i.isdigit() for i in array_items) or len(array_items) % 16 != 0:
             return keys
-        #
+
         for fcall in array_items:
-            args = _re(Patterns.GET, fcall, l=False).groups()
+            args = _re(Patterns.GET, fcall).groups()
             keys.append(s._get(args[1:], ""))
 
         return keys
 
     @staticmethod
     def _get_indexes(s: "Megacloud") -> list[int]:
-        array_items = _re(Patterns.INDEX_ARRAY_CONTENT, s.script, l=True)[-1]
-        array_items = _re(Patterns.INDEX_ARRAY_ITEM, array_items, l=True)
+        array_items = _re(Patterns.INDEX_ARRAY_CONTENT, s.script, all=True)[-1]
+        array_items = _re(Patterns.INDEX_ARRAY_ITEM, array_items, all=True)
         indexes = []
 
         if not any(any(ii.isdigit() for ii in i) for i in array_items) or len(array_items) % 16 != 0:
@@ -122,7 +116,7 @@ class Resolvers:
             idx = m[0] or m[1] or m[2]
 
             if not idx.isdigit():
-                idx = _re(Patterns.IDX, idx, l=False).group(1)
+                idx = _re(Patterns.IDX, idx).group(1)
 
             indexes.append(int(idx))
 
@@ -139,9 +133,9 @@ class Resolvers:
     @classmethod
     def abc(cls, s: "Megacloud") -> tuple[list, list]:
         values = {}
-        c = _re(Patterns.GET_KEY, s.script, l=False).group(1)
+        c = _re(Patterns.GET_KEY, s.script).group(1)
 
-        for f in _re(Patterns.DICT_SET, c, l=True):
+        for f in _re(Patterns.DICT_SET, c, all=True):
             i = 0 if f[0] else 17
             key_idxs = list(filter(None, f[i + 1 : i + 8]))
 
@@ -153,13 +147,13 @@ class Resolvers:
 
             values[k] = v
 
-        get_key_func = _re(Patterns.GET_KEY_FUNC, c, l=False).group(2)
+        get_key_func = _re(Patterns.GET_KEY_FUNC, c).group(2)
 
         order = get_key_func.split("return")[-1].split(";")[0]
         order = order.replace("()", "")
         order = re.sub(rf"\w\[(.+?)\]", r"\1", order)
 
-        for f in _re(Patterns.GET, order, l=True):
+        for f in _re(Patterns.GET, order, all=True):
             indexes = list(filter(None, f[1:]))
 
             v = s._get(indexes, get_key_func)
@@ -170,8 +164,8 @@ class Resolvers:
 
     @classmethod
     def add_funcs(cls, s: "Megacloud") -> tuple[list, list]:
-        get_key = _re(Patterns.GET_KEY, s.script, l=False).group(1)
-        funcs = _re(Patterns.GET_KEY_FUNC, get_key, l=True)
+        get_key = _re(Patterns.GET_KEY, s.script).group(1)
+        funcs = _re(Patterns.GET_KEY_FUNC, get_key, all=True)
 
         if len(funcs) < 3:
             return [], []
@@ -179,8 +173,8 @@ class Resolvers:
         key = ""
 
         for f in funcs[:-1]:
-            ret = _re(Patterns.GET_KEY_FUNC_RETURN, f[1], l=False).group(1)
-            args = _re(Patterns.GET, ret, l=False).groups()
+            ret = _re(Patterns.GET_KEY_FUNC_RETURN, f[1]).group(1)
+            args = _re(Patterns.GET, ret).groups()
 
             key += s._get(args[1:], f[1])
 
@@ -190,7 +184,7 @@ class Resolvers:
     def map(cls, s: "Megacloud") -> tuple[list, list]:
         try:
             keys = cls._get_keys(s)
-        except ValueError as e:
+        except ValueError:
             keys = []
 
         try:
@@ -205,12 +199,12 @@ class Resolvers:
         raw_values = []
 
         if indexes:
-            map_ = _re(Patterns.MAP, s.script, l=False)
+            map_ = _re(Patterns.MAP, s.script)
             map_arg = map_.group(1)
             map_body = map_.group(2)
 
-            if m := re.search(Patterns.BITWISE2, map_body):
-                flag = _re(Patterns.SET_DEF_FLAG, map_body, l=False).group(1)
+            if m := _re(Patterns.BITWISE2, map_body, default=None):
+                flag = _re(Patterns.SET_DEF_FLAG, map_body).group(1)
                 func = s.bitwise[int(flag)]
 
                 var_name = m.group(1) if m.group(1) != map_arg else m.group(2)
@@ -219,11 +213,11 @@ class Resolvers:
                 raw_values = [func(int(var_value), int(i)) for i in indexes]
 
         elif keys:
-            map_ = _re(Patterns.MAP, s.script, l=False)
+            map_ = _re(Patterns.MAP, s.script)
             map_arg = map_.group(1)
             map_body = map_.group(2)
 
-            if re.search(Patterns.PARSE_INT.format(map_arg), map_body):
+            if _re(Patterns.PARSE_INT.fmt(map_arg), map_body, default=None):
                 raw_values = [int(k, 16) for k in keys]
 
             # elif m := re.search(bitwise3_pattern, map_body):
@@ -238,7 +232,6 @@ class Resolvers:
     @classmethod
     def fallback(cls, s: "Megacloud") -> tuple[list, list]:
         to_try = [cls.slice, cls.add_funcs, cls.from_charcode]
-        # to_try = [cls.cmd]
 
         for t in to_try:
             try:
@@ -251,12 +244,7 @@ class Resolvers:
 
     @classmethod
     def resolve(cls, flags: int, s: "Megacloud") -> bytes:
-        key = ""
-        keys = []
-        indexes = []
-
-        if flags & ResolverFlags.MAP:
-            keys, indexes = cls.map(s)
+        keys, indexes = cls.map(s)
 
         if flags & (ResolverFlags.SLICE | ResolverFlags.SPLIT):
             keys, indexes = cls.slice(s)
@@ -267,15 +255,16 @@ class Resolvers:
         if flags & ResolverFlags.ABC:
             keys, indexes = cls.abc(s)
 
-        if flags & ResolverFlags.FALLBACK:
-            keys, indexes = cls.fallback(s)
+        key = [keys[i] for i in indexes]
 
-        key = "".join(keys[i] for i in indexes)
+        if len("".join(key)) != 64:
+            keys, indexes = cls.fallback(s)
+            key = [keys[i] for i in indexes]
 
         if flags & ResolverFlags.REVERSE:
-            key = "".join(reversed(key))
+            key = reversed(key)
 
-        return key.encode()
+        return "".join(key).encode()
 
 
 async def make_request(url: str, headers: dict, params: dict, func: Callable[[aiohttp.ClientResponse], Awaitable[T]]) -> T:
@@ -285,20 +274,23 @@ async def make_request(url: str, headers: dict, params: dict, func: Callable[[ai
 
 
 @overload
-def _re(pattern: Patterns | str, string: str, *, l: Literal[True]) -> list: ...
+def _re(pattern: Patterns, string: str) -> re.Match: ...
 @overload
-def _re(pattern: Patterns | str, string: str, *, l: Literal[False]) -> re.Match: ...
+def _re(pattern: Patterns, string: str, *, default: T) -> re.Match | T: ...
+@overload
+def _re(pattern: Patterns, string: str, *, all: Literal[True]) -> list: ...
+@overload
+def _re(pattern: Patterns, string: str, *, all: Literal[True], default: T) -> list | T: ...
 
 
-def _re(pattern: Patterns | str, string: str, *, l: bool) -> re.Match | list:
-    if l:
-        v = re.findall(pattern, string)
+def _re(pattern: Patterns, string: str, *, all: bool = False, default: T = None) -> re.Match | list | T:
+    v = re.findall(pattern.formatted, string) if all else re.search(pattern.formatted, string)
 
-    else:
-        v = re.search(pattern, string)
+    if not v and default:
+        return default
 
-    if not v:
-        msg = f"{pattern.name} not found" if isinstance(pattern, Patterns) else f"{pattern} not found"
+    elif not v:
+        msg = f"{pattern.name} not found"
         raise ValueError(msg)
 
     return v
@@ -369,14 +361,14 @@ class Megacloud:
     def _get_bitwise_operations(self) -> dict[int, Callable]:
         functions = {}
 
-        switchcase_section = _re(Patterns.BITWISE_SWITCHCASE, self.script, l=False).group(1)
-        for num, operation in _re(Patterns.BITWISE_OPERATION, switchcase_section, l=True):
+        switchcase_section = _re(Patterns.BITWISE_SWITCHCASE, self.script).group(1)
+        for num, operation in _re(Patterns.BITWISE_OPERATION, switchcase_section, all=True):
             functions[int(num)] = self._generate_bitwise_func(operation.split("=")[1])
 
         return functions
 
     def _get_array_slices(self) -> list[tuple[int, ...]]:
-        pairs = tuple(map(lambda t: tuple(map(int, t)), _re(Patterns.SLICES, self.script, l=True)))
+        pairs = tuple(map(lambda t: tuple(map(int, t)), _re(Patterns.SLICES, self.script, all=True)))
         order_map = {v: i for i, v in enumerate(generate_sequence(len(pairs)))}
 
         pairs = list(sorted(pairs, key=lambda t: order_map[t[0]]))
@@ -392,7 +384,7 @@ class Megacloud:
 
     def _get_flags(self, ctx: str) -> list[int]:
         try:
-            flags = _re(Patterns.SET_DEF_FLAG, ctx, l=True)
+            flags = _re(Patterns.SET_DEF_FLAG, ctx, all=True)
             flag = list(filter(lambda i: i <= 15, map(int, flags)))
 
         except ValueError:
@@ -417,7 +409,7 @@ class Megacloud:
         if not var.isdigit():
             var = var.replace("$", r"\$")
 
-            bitwise_args = _re(Patterns.VAR.format(name=var), self.script, l=False)
+            bitwise_args = _re(Patterns.VAR.fmt(name=var), self.script)
             bitwise_args = bitwise_args.group(1) or bitwise_args.group(2)
             bitwise_args = tuple(map(int, re.findall(r"(\d+)", bitwise_args)))
 
@@ -465,13 +457,14 @@ class Megacloud:
         return v
 
     def _resolve_key(self) -> bytes:
-        get_key = _re(Patterns.GET_KEY, self.script, l=False).group(1)
-        get_key_body = _re(Patterns.GET_KEY_FUNC, get_key, l=False).group(2)
+        get_key = _re(Patterns.GET_KEY, self.script).group(1)
+        get_key_body = _re(Patterns.GET_KEY_FUNC, get_key).group(2)
 
         functions: list[str] = []
 
-        for i in re.findall(Patterns.GET, get_key_body):
-            functions.append(self._get(i[1:], get_key_body))
+        for i in _re(Patterns.GET, get_key_body, all=True, default=[]):
+            string = self._get(i[1:], get_key_body)
+            functions.append(string)
 
         flags = 0
 
@@ -481,9 +474,6 @@ class Megacloud:
 
             elif len(f) == 1 and ord(f) in range(97, 123):
                 flags |= ResolverFlags.ABC
-
-        if not flags:
-            flags |= ResolverFlags.FALLBACK
 
         key = Resolvers.resolve(flags, self) or b":P"
         return key
@@ -495,9 +485,9 @@ class Megacloud:
         script_version = int(time.time())
         self.script = await make_request(script_url, {}, {"v": script_version}, lambda i: i.text())
 
-        xor_key = _re(Patterns.XOR_KEY, self.script, l=False).group(1)
-        char_sequence = parse.unquote(_re(Patterns.STRING, self.script, l=False).group(1))
-        delim = _re(Patterns.DELIMITER, self.script, l=False).group(1)
+        xor_key = _re(Patterns.XOR_KEY, self.script).group(1)
+        char_sequence = parse.unquote(_re(Patterns.STRING, self.script).group(1))
+        delim = _re(Patterns.DELIMITER, self.script).group(1)
 
         for i in range(len(char_sequence)):
             a = ord(char_sequence[i])
@@ -514,7 +504,7 @@ class Megacloud:
         return key
 
     async def extract(self) -> dict:
-        id = _re(Patterns.SOURCE_ID, self.embed_url, l=False).group(1)
+        id = _re(Patterns.SOURCE_ID, self.embed_url).group(1)
         get_src_url = f"{self.base_url}/embed-2/v2/e-1/getSources"
 
         resp = await make_request(get_src_url, self.headers, {"id": id}, lambda i: i.json())
@@ -534,7 +524,7 @@ class Megacloud:
 
 
 async def main():
-    url = "	https://megacloud.blog/embed-2/v2/e-1/cTc4e3yDHn2k?k=1&autoPlay=1&oa=0&asi=1"
+    url = "https://megacloud.blog/embed-2/v2/e-1/KJysn8aLPTuY?k=1&autoPlay=1&oa=0&asi=1"
     a = Megacloud(url)
     print(json.dumps(await a.extract(), indent=4))
 
