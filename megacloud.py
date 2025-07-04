@@ -16,6 +16,7 @@ T = TypeVar("T")
 
 
 class ResolverFlags(IntEnum):
+    FALLBACK = 1
     REVERSE = 1 << 1
     FROMCHARCODE = 1 << 2
     SLICE = 1 << 3
@@ -184,12 +185,12 @@ class Resolvers:
     def map(cls, s: "Megacloud") -> tuple[list, list]:
         try:
             keys = cls._get_keys(s)
-        except ValueError as e:
+        except ValueError:
             keys = []
 
         try:
             indexes = cls._get_indexes(s)
-        except ValueError as e:
+        except ValueError:
             indexes = []
 
         return keys, indexes
@@ -227,20 +228,32 @@ class Resolvers:
         return [chr(v) for v in raw_values], list(range(0, len(raw_values)))
 
     @classmethod
-    def fallback(cls, s: "Megacloud") -> tuple[list, list]:
-        to_try = [cls.slice, cls.add_funcs, cls.from_charcode]
+    def fallback(cls, s: "Megacloud", keys: list, indexes: list) -> tuple[list, list]:
+        def _map(_) -> tuple[list, list]:
+            if keys and indexes:
+                key = "".join(keys[i] for i in indexes)
+                if len(key) == 64:
+                    return keys, indexes
 
-        for t in to_try:
+            return [], []
+
+        to_try = [_map, cls.slice, cls.add_funcs, cls.from_charcode]
+
+        for func in to_try:
             try:
-                return t(s)
-            except ValueError as e:
+                res = func(s)
+                if res[0]:
+                    return res
                 continue
 
-        else:
-            raise ValueError("key not found =(")
+            except ValueError:
+                continue
+
+        return [], []
 
     @classmethod
     def resolve(cls, flags: int, s: "Megacloud") -> bytes:
+        key = ""
         keys, indexes = cls.map(s)
 
         if flags & (ResolverFlags.SLICE | ResolverFlags.SPLIT):
@@ -252,11 +265,10 @@ class Resolvers:
         if flags & ResolverFlags.ABC:
             keys, indexes = cls.abc(s)
 
-        key = [keys[i] for i in indexes]
+        if flags & ResolverFlags.FALLBACK:
+            keys, indexes = cls.fallback(s, keys, indexes)
 
-        if len("".join(key)) != 64:
-            keys, indexes = cls.fallback(s)
-            key = [keys[i] for i in indexes]
+        key = [keys[i] for i in indexes]
 
         if flags & ResolverFlags.REVERSE:
             key = reversed(key)
@@ -477,8 +489,10 @@ class Megacloud:
             elif len(f) == 1 and ord(f) in range(97, 123):
                 flags |= ResolverFlags.ABC
 
-        key = Resolvers.resolve(flags, self) or b":P"
-        return key
+        if not flags:
+            flags = ResolverFlags.FALLBACK
+
+        return Resolvers.resolve(flags, self)
 
     async def _get_secret_key(self) -> bytes:
         strings = ""
@@ -502,8 +516,7 @@ class Megacloud:
         self.string_array = self._shuffle_array(string_array)
         self.bitwise = self._get_bitwise_operations()
 
-        key = self._resolve_key()
-        return key
+        return self._resolve_key()
 
     async def extract(self) -> dict:
         id = _re(Patterns.SOURCE_ID, self.embed_url).group(1)
@@ -515,6 +528,7 @@ class Megacloud:
             raise ValueError("no sources found")
 
         key = await self._get_secret_key()
+        assert key
         sources = json.loads(decrypt_sources(key, resp["sources"]))
 
         resp["sources"] = sources
@@ -526,7 +540,7 @@ class Megacloud:
 
 
 async def main():
-    url = "https://megacloud.blog/embed-2/v2/e-1/KJysn8aLPTuY?k=1&autoPlay=1&oa=0&asi=1"
+    url = "https://megacloud.blog/embed-2/v2/e-1/4HkPRxypS1AS?k=1&autoPlay=1&oa=0&asi=1"
     a = Megacloud(url)
     print(json.dumps(await a.extract(), indent=4))
 
