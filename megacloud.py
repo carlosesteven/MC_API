@@ -7,12 +7,14 @@ from urllib import parse
 import re
 import aiohttp
 
-from typing import Awaitable, Callable, Iterable, TypeVar, overload, Literal
+from typing import Awaitable, Callable, Iterable, TypeVar, overload, Literal, TypeAlias
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from enum import StrEnum, IntEnum
 
+HEXDIGITS = "0123456789abcdef"
 T = TypeVar("T")
+_KeyPair: TypeAlias = tuple[list[str], list[int]]
 
 
 class ResolverFlags(IntEnum):
@@ -32,24 +34,24 @@ class Patterns(StrEnum):
     SOURCE_ID = r"embed-2/v2/e-1/([A-z0-9]+)\?"
 
     IDX = r'"(\d+)"'
-    VAR = r'[ ;]{name}=(?:\+?"?(\d+)"?;|[\w$][\w$][\w$]\.[\w$][\w$]\(((?:"?\d+"?,?)+)\))'
+    VAR = r"(?:^|[ ;]){name}=([^;]+);"
     DICT = r"[\w$]{2}=\{\}"
 
     XOR_KEY = r"\)\('(.+)'\)};"
     STRING = r"function [\w$]{2}\(\){return \"(.+?)\";}"
     DELIMITER = r"[\w$]{3}=\w\.[\w$]{2}\([\w$]{3},'(.)'\);"
 
-    BITWISE_SWITCHCASE = r"\w\[\d+\]=\(function\([\w$]+\)[{\d\w$:\(\),= ]+;switch\([\w$]+\){([^}]+)}"
-    BITWISE_OPERATION = r"case (\d+):([\w\[\]\-+|><^* =$\(\)]+);break;"
-    BITWISE_DEF_FLAG_FUNC = r"\w\[\d+\]=\(function\([\w$]+\).+?;switch\([\w$]+\){[^,]+,([\w$]+)"
-    SET_DEF_FLAG = rf"{_FUNC}\((\d+)\)"
+    COMPUTE_OP_FUNC = r"\w\[\d+\]=\(function\([\w$]+\)[{\d\w$:\(\),= ]+;switch\([\w$]+\){([^}]+)}"
+    OPERATION = r"case (\d+):([\w\[\]\-+|><^* =$\(\)]+);break;"
+    DEF_OPCODE_FUNC = r"\w\[\d+\]=\(function\([\w$]+\).+?;switch\([\w$]+\){[^,]+,([\w$]+)"
+    SET_DEF_OPCODE = rf"{_FUNC}\((\d+)\)"
 
     SLICES = rf"case\s(\d{{1,2}}):{_FUNC2}\({_FUNC2}\(\),[\w$]{{3}},{_FUNC2}\({_FUNC2}\([\w$]{{3}},([\d\-]+),[\d\-]+\),[\d\-]+,([\d\-]+)\)\)"
 
     _GET1_INDEX = r'+?"?([\w$]+)"?( [|\-\+*><^]+ "?[\w$]+"?)?'
     GET1 = rf"{_FUNC}\(\{_GET1_INDEX}\)"
     GET2 = rf'{_FUNC}\({_FUNC}\("?(\w+)"?,"?(\w+)"?\)\)'
-    GET3 = rf'{_FUNC}\({_FUNC}\("?(\w+)"?,"?(\w+)"?,{SET_DEF_FLAG}\)\)'
+    GET3 = rf'{_FUNC}\({_FUNC}\("?(\w+)"?,"?(\w+)"?,{SET_DEF_OPCODE}\)\)'
     GET = f"({GET1}|{GET2}|{GET3})"
 
     INDEX_ARRAY_CONTENT = r'\w=\[((?!arguments)[\w\d.$\(\)",+]+)\];'
@@ -58,15 +60,14 @@ class Patterns(StrEnum):
     KEY_ARRAY_CONTENT = rf'\w=\[((?!arguments)[\w\d.$\(\)",+]+)\];'
     KEY_VAR = r"var (?:[\w$]{1,2},){28,}.+?[\w$\.]+=([^;]+?);"
 
-    MAP = r"\((\w)=>{(.+?return.+?;)"
-
     PARSE_INT = r'[\w$]+\({},\+?"?16"?'
-    BITWISE2 = rf"{_FUNC}\((\w),(\w)\)"
-    BITWISE3 = rf'{_FUNC}\("?(\d+)"?,"?(\d+)"?,{_FUNC}\((\d)\)\)'
+    APPLY_OP = rf"{_FUNC}\((\w),(\w)\)"
+    APPLY_OP_SPEC = rf'{_FUNC}\("?(\d+)"?,"?(\d+)"?,{_FUNC}\((\d)\)\)'
 
-    GET_KEY = r"var (?:[\w$]{1,2},?){28,};(.+?)try"
+    GET_KEY_CTX = r"var (?:[\w$]{1,2},?){28,};(.+?)try"
     GET_KEY_FUNC = r"(\w)=\(\)=>{(.+?)};"
     GET_KEY_FUNC_RETURN = r"return(.+?);[\}\)]"
+    GET_KEY_FUNC_MAP = r"\((\w)=>{(.+?return.+?;)"
 
     DICT_SET1 = rf"[\w$]{{2}}\[(?:{GET})\]=({GET})"
     DICT_SET2 = rf"[\w$]{{2}}\[(?:{GET})\]=\(\)=>({{.+?return {GET})"
@@ -124,31 +125,45 @@ class Resolvers:
         return indexes
 
     @classmethod
-    def slice(cls, s: "Megacloud") -> tuple[list, list]:
+    def map(cls, s: "Megacloud") -> _KeyPair:
+        try:
+            keys = cls._get_keys(s)
+        except ValueError:
+            keys = []
+
+        try:
+            indexes = cls._get_indexes(s)
+        except ValueError:
+            indexes = []
+
+        return keys, indexes
+
+    @classmethod
+    def slice(cls, s: "Megacloud") -> _KeyPair:
         key = cls._get_key(s)
-        if key.endswith("="):
+        if any(c not in HEXDIGITS for c in key):
             key = base64.b64decode(key).decode()
 
         return list(key), list(range(0, len(key)))
 
     @classmethod
-    def abc(cls, s: "Megacloud") -> tuple[list, list]:
+    def abc(cls, s: "Megacloud") -> _KeyPair:
         values = {}
-        c = _re(Patterns.GET_KEY, s.script).group(1)
+        ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
 
-        for f in _re(Patterns.DICT_SET, c, all=True):
+        for f in _re(Patterns.DICT_SET, ctx, all=True):
             i = 0 if f[0] else 17
             key_idxs = list(filter(None, f[i + 1 : i + 8]))
 
             context = f[i + 8]
             value_idxs = list(filter(None, f[i + 10 : i + 17]))
 
-            k = s._get(key_idxs, c)
+            k = s._get(key_idxs, ctx)
             v = s._get(value_idxs, context)
 
             values[k] = v
 
-        get_key_func = _re(Patterns.GET_KEY_FUNC, c).group(2)
+        get_key_func = _re(Patterns.GET_KEY_FUNC, ctx).group(2)
 
         order = get_key_func.split("return")[-1].split(";")[0]
         order = order.replace("()", "")
@@ -164,9 +179,9 @@ class Resolvers:
         return list(key), list(range(0, len(key)))
 
     @classmethod
-    def add_funcs(cls, s: "Megacloud") -> tuple[list, list]:
-        get_key = _re(Patterns.GET_KEY, s.script).group(1)
-        funcs = _re(Patterns.GET_KEY_FUNC, get_key, all=True)
+    def add_funcs(cls, s: "Megacloud") -> _KeyPair:
+        ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
+        funcs = _re(Patterns.GET_KEY_FUNC, ctx, all=True)
 
         if len(funcs) < 3:
             return [], []
@@ -182,31 +197,17 @@ class Resolvers:
         return list(key), list(range(0, len(key)))
 
     @classmethod
-    def map(cls, s: "Megacloud") -> tuple[list, list]:
-        try:
-            keys = cls._get_keys(s)
-        except ValueError:
-            keys = []
-
-        try:
-            indexes = cls._get_indexes(s)
-        except ValueError:
-            indexes = []
-
-        return keys, indexes
-
-    @classmethod
-    def from_charcode(cls, s: "Megacloud", keys: list = [], indexes: list = []) -> tuple[list, list]:
+    def from_charcode(cls, s: "Megacloud", keys: list = [], indexes: list = []) -> _KeyPair:
         raw_values = []
 
         if indexes:
-            map_ = _re(Patterns.MAP, s.script)
+            map_ = _re(Patterns.GET_KEY_FUNC_MAP, s.script)
             map_arg = map_.group(1)
             map_body = map_.group(2)
 
-            if m := _re(Patterns.BITWISE2, map_body, default=None):
-                flag = _re(Patterns.SET_DEF_FLAG, map_body).group(1)
-                func = s.bitwise[int(flag)]
+            if m := _re(Patterns.APPLY_OP, map_body, default=None):
+                opcode = _re(Patterns.SET_DEF_OPCODE, map_body).group(1)
+                func = s.compute_op[int(opcode)]
 
                 var_name = m.group(1) if m.group(1) != map_arg else m.group(2)
                 var_value = s._var_to_num(var_name, s.script)
@@ -214,7 +215,7 @@ class Resolvers:
                 raw_values = [func(int(var_value), int(i)) for i in indexes]
 
         elif keys:
-            map_ = _re(Patterns.MAP, s.script)
+            map_ = _re(Patterns.GET_KEY_FUNC_MAP, s.script)
             map_arg = map_.group(1)
             map_body = map_.group(2)
 
@@ -228,8 +229,38 @@ class Resolvers:
         return [chr(v) for v in raw_values], list(range(0, len(raw_values)))
 
     @classmethod
-    def fallback(cls, s: "Megacloud", keys: list, indexes: list) -> tuple[list, list]:
-        def _map(_) -> tuple[list, list]:
+    def compute_strings(cls, s: "Megacloud") -> _KeyPair:
+        ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
+        ret = _re(Patterns.GET_KEY_FUNC_RETURN, ctx).group(1)
+
+        apply_op_args = _re(Patterns.APPLY_OP, ret)
+        a, b = apply_op_args.group(1), apply_op_args.group(2)
+
+        a_get = _re(Patterns.VAR.fmt(name=a), ctx).group(1)
+        b_get = _re(Patterns.VAR.fmt(name=b), ctx).group(1)
+
+        a_get_args = _re(Patterns.GET, a_get).groups()[1:]
+        b_get_args = _re(Patterns.GET, b_get).groups()[1:]
+
+        a_value = s._get(a_get_args, ctx)
+        b_value = s._get(b_get_args, ctx)
+
+        if any(c not in HEXDIGITS for c in a_value):
+            a_value = base64.b64decode(a_value).decode()
+
+        if any(c not in HEXDIGITS for c in b_value):
+            b_value = base64.b64decode(b_value).decode()
+
+        ctx = _re(Patterns.GET_KEY_FUNC, ctx).group(2)
+        opcode = _re(Patterns.SET_DEF_OPCODE, ctx).group(1)
+
+        key = s.compute_op[int(opcode)](a_value, b_value)
+
+        return list(key), list(range(0, len(key)))
+
+    @classmethod
+    def fallback(cls, s: "Megacloud", keys: list, indexes: list) -> _KeyPair:
+        def _map(_) -> _KeyPair:
             if keys and indexes:
                 key = "".join(keys[i] for i in indexes)
                 if len(key) == 64:
@@ -237,7 +268,7 @@ class Resolvers:
 
             return [], []
 
-        to_try = [_map, cls.slice, cls.add_funcs, cls.from_charcode]
+        to_try = [_map, cls.compute_strings, cls.slice, cls.add_funcs, cls.from_charcode]
 
         for func in to_try:
             try:
@@ -255,6 +286,7 @@ class Resolvers:
     def resolve(cls, flags: int, s: "Megacloud") -> bytes:
         key = ""
         keys, indexes = cls.map(s)
+        print(f"{keys=} {indexes=}")
 
         if flags & (ResolverFlags.SLICE | ResolverFlags.SPLIT):
             keys, indexes = cls.slice(s)
@@ -356,9 +388,9 @@ class Megacloud:
 
         self.script: str
         self.string_array: list[str]
-        self.bitwise: dict[int, Callable]
+        self.compute_op: dict[int, Callable]
 
-    def _generate_bitwise_func(self, operation: str) -> Callable:
+    def _generate_op_func(self, operation: str) -> Callable:
         operation = re.sub(r"[\w$]{2}", "args", operation)
         if any(i in operation for i in (">", "<")):
             v = operation.split()
@@ -367,12 +399,12 @@ class Megacloud:
 
         return lambda *args: eval(operation)
 
-    def _get_bitwise_operations(self) -> dict[int, Callable]:
+    def _get_operations(self) -> dict[int, Callable]:
         functions = {}
 
-        switchcase_section = _re(Patterns.BITWISE_SWITCHCASE, self.script).group(1)
-        for num, operation in _re(Patterns.BITWISE_OPERATION, switchcase_section, all=True):
-            functions[int(num)] = self._generate_bitwise_func(operation.split("=")[1])
+        compute_op_func = _re(Patterns.COMPUTE_OP_FUNC, self.script).group(1)
+        for num, operation in _re(Patterns.OPERATION, compute_op_func, all=True):
+            functions[int(num)] = self._generate_op_func(operation.split("=")[1])
 
         return functions
 
@@ -391,22 +423,22 @@ class Megacloud:
 
         return array
 
-    def _get_flags(self, ctx: str) -> list[int]:
+    def _get_opcodes(self, ctx: str) -> list[int]:
         try:
-            flags = _re(Patterns.SET_DEF_FLAG, ctx, all=True)
-            flag = list(filter(lambda i: i <= 15, map(int, flags)))
+            opcodes = _re(Patterns.SET_DEF_OPCODE, ctx, all=True)
+            opcodes = list(filter(lambda i: i <= 15, map(int, opcodes)))
 
         except ValueError:
-            flag = [0]
+            opcodes = [0]
 
-        return flag
+        return opcodes
 
-    def _calc_bitwise(self, args: Iterable, ctx: str) -> int:
+    def _apply_op(self, args: Iterable, ctx: str) -> int:
         args = map(int, args)
 
-        for f in self._get_flags(ctx):
+        for o in self._get_opcodes(ctx):
             try:
-                v = self.bitwise[f](*args)
+                v = self.compute_op[o](*args)
 
             except IndexError:
                 continue
@@ -414,7 +446,7 @@ class Megacloud:
             if v in range(0, len(self.string_array)):
                 return v
 
-        raise ValueError(f"wrong bitwise args")
+        raise ValueError(f"can't apply op")
 
     def _var_to_num(self, var: str, ctx: str) -> str:
         if not var.isdigit():
@@ -427,7 +459,7 @@ class Megacloud:
             if len(var_value) == 1:
                 return str(var_value[0])
 
-            return str(self._calc_bitwise(var_value, ctx))
+            return str(self._apply_op(var_value, ctx))
 
         return var
 
@@ -457,11 +489,11 @@ class Megacloud:
             i2 = int(self._var_to_num(values[1], ctx))
 
             if len(values) == 3:
-                flag = int(self._var_to_num(values[2], ctx))
-                i = self.bitwise[flag](i1, i2)
+                opcode = int(self._var_to_num(values[2], ctx))
+                i = self.compute_op[opcode](i1, i2)
 
             else:
-                i = self._calc_bitwise((i1, i2), ctx)
+                i = self._apply_op((i1, i2), ctx)
 
             v = self.string_array[i]
 
@@ -471,14 +503,17 @@ class Megacloud:
         return v
 
     def _resolve_key(self) -> bytes:
-        get_key = _re(Patterns.GET_KEY, self.script).group(1)
-        get_key_body = _re(Patterns.GET_KEY_FUNC, get_key).group(2)
+        ctx = _re(Patterns.GET_KEY_CTX, self.script).group(1)
+        get_key_body = _re(Patterns.GET_KEY_FUNC, ctx).group(2)
 
         functions: list[str] = []
 
         for i in _re(Patterns.GET, get_key_body, all=True, default=[]):
             string = self._get(i[1:], get_key_body)
             functions.append(string)
+
+        print(f"{get_key_body=}")
+        print(f"{functions=}")
 
         flags = 0
 
@@ -514,9 +549,14 @@ class Megacloud:
 
         string_array = strings.split(delim)
         self.string_array = self._shuffle_array(string_array)
-        self.bitwise = self._get_bitwise_operations()
+        self.compute_op = self._get_operations()
 
-        return self._resolve_key()
+        key = self._resolve_key()
+
+        assert key
+        assert len(key) == 64
+
+        return key
 
     async def extract(self) -> dict:
         id = _re(Patterns.SOURCE_ID, self.embed_url).group(1)
@@ -528,7 +568,6 @@ class Megacloud:
             raise ValueError("no sources found")
 
         key = await self._get_secret_key()
-        assert key
         sources = json.loads(decrypt_sources(key, resp["sources"]))
 
         resp["sources"] = sources
@@ -540,7 +579,7 @@ class Megacloud:
 
 
 async def main():
-    url = "https://megacloud.blog/embed-2/v2/e-1/4HkPRxypS1AS?k=1&autoPlay=1&oa=0&asi=1"
+    url = "	https://megacloud.blog/embed-2/v2/e-1/AFgwhJuY1JA1?k=1&autoPlay=1&oa=0&asi=1"
     a = Megacloud(url)
     print(json.dumps(await a.extract(), indent=4))
 
