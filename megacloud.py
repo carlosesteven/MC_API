@@ -12,6 +12,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from enum import StrEnum, IntEnum
 
+DEFAULT = object()
 HEXDIGITS = "0123456789abcdef"
 T = TypeVar("T")
 _KeyPair: TypeAlias = tuple[list[str], list[int]]
@@ -324,15 +325,14 @@ def _re(pattern: Patterns, string: str, *, all: Literal[True]) -> list: ...
 def _re(pattern: Patterns, string: str, *, all: Literal[True], default: T) -> list | T: ...
 
 
-def _re(pattern: Patterns, string: str, *, all: bool = False, default: T = None) -> re.Match | list | T:
+def _re(pattern: Patterns, string: str, *, all: bool = False, default: T = DEFAULT) -> re.Match | list | T:
     v = re.findall(pattern.formatted, string) if all else re.search(pattern.formatted, string)
 
-    if not v and default:
-        return default
+    if not v:
+        if default is DEFAULT:
+            raise ValueError(f"{pattern.name} not found")
 
-    elif not v:
-        msg = f"{pattern.name} not found"
-        raise ValueError(msg)
+        return default
 
     return v
 
@@ -579,7 +579,7 @@ class Megacloud:
 
 
 async def main():
-    url = "	https://megacloud.blog/embed-2/v2/e-1/AFgwhJuY1JA1?k=1&autoPlay=1&oa=0&asi=1"
+    url = "https://megacloud.blog/embed-2/v2/e-1/uz15BP6k7lg8?k=1&autoPlay=1&oa=0&asi=1"
     a = Megacloud(url)
     print(json.dumps(await a.extract(), indent=4))
 
