@@ -200,11 +200,12 @@ class Resolvers:
     @classmethod
     def from_charcode(cls, s: "Megacloud", keys: list = [], indexes: list = []) -> _KeyPair:
         raw_values = []
+        ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
 
         if indexes:
             raw_values = indexes
 
-            map_ = _re(Patterns.GET_KEY_FUNC_MAP, s.script, default=None)
+            map_ = _re(Patterns.GET_KEY_FUNC_MAP, ctx, default=None)
             if map_:
                 map_arg = map_.group(1)
                 map_body = map_.group(2)
@@ -220,7 +221,7 @@ class Resolvers:
                 raw_values = [func(int(var_value), int(i)) for i in raw_values]
 
         elif keys:
-            map_ = _re(Patterns.GET_KEY_FUNC_MAP, s.script)
+            map_ = _re(Patterns.GET_KEY_FUNC_MAP, ctx)
             map_arg = map_.group(1)
             map_body = map_.group(2)
 
@@ -291,7 +292,6 @@ class Resolvers:
     def resolve(cls, flags: int, s: "Megacloud") -> bytes:
         key = ""
         keys, indexes = cls.map(s)
-        print(f"{keys=} {indexes=}")
 
         if flags & (ResolverFlags.SLICE | ResolverFlags.SPLIT):
             keys, indexes = cls.slice(s)
@@ -332,10 +332,11 @@ def _re(pattern: Patterns, string: str, *, all: Literal[True], default: T) -> li
 def _re(pattern: Patterns, string: str, *, all: bool = False, default: T = DEFAULT) -> re.Match | list | T:
     v = re.findall(pattern.formatted, string) if all else re.search(pattern.formatted, string)
 
-    if not v:
-        if default is DEFAULT:
-            raise ValueError(f"{pattern.name} not found")
+    if not v and default:
+        msg = f"{pattern.name} not found"
+        raise ValueError(msg)
 
+    elif not v:
         return default
 
     return v
@@ -454,16 +455,18 @@ class Megacloud:
 
     def _var_to_num(self, var: str, ctx: str) -> str:
         if not var.isdigit():
-            var = var.replace("$", r"\$")
+            var_name = var.replace("$", r"\$")
 
-            var_value = _re(Patterns.VAR.fmt(name=var), self.script)
+            var_value = _re(Patterns.VAR.fmt(name=var_name), self.script)
             var_value = var_value.group(1) or var_value.group(2)
-            var_value = re.findall(r"(\d+)", var_value)
 
-            if len(var_value) == 1:
-                return str(var_value[0])
+            digits = [d for m in re.findall(r"\(([^\)]+)\)", var_value) for d in re.findall(r"(\d+)", m)]
+            assert len(digits) > 0
 
-            return str(self._apply_op(var_value, ctx))
+            if len(digits) == 1:
+                return str(digits[0])
+
+            return str(self._apply_op(digits, ctx))
 
         return var
 
@@ -515,9 +518,6 @@ class Megacloud:
         for i in _re(Patterns.GET, get_key_body, all=True, default=[]):
             string = self._get(i[1:], get_key_body)
             functions.append(string)
-
-        print(f"{get_key_body=}")
-        print(f"{functions=}")
 
         flags = 0
 
