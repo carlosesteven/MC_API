@@ -457,10 +457,10 @@ class Megacloud:
         if not var.isdigit():
             var_name = var.replace("$", r"\$")
 
-            var_value = _re(Patterns.VAR.fmt(name=var_name), self.script)
-            var_value = var_value.group(1) or var_value.group(2)
+            var_value = _re(Patterns.VAR.fmt(name=var_name), self.script).group(1)
+            var_value = re.sub(Patterns._FUNC, "", var_value)
 
-            digits = [d for m in re.findall(r"\(([^\)]+)\)", var_value) for d in re.findall(r"(\d+)", m)]
+            digits = re.findall(r"\d+", var_value)
             assert len(digits) > 0
 
             if len(digits) == 1:
