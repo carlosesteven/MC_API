@@ -439,7 +439,7 @@ class Megacloud:
         return opcodes
 
     def _apply_op(self, args: Iterable, ctx: str) -> int:
-        args = map(int, args)
+        args = list(map(int, args))
 
         for o in self._get_opcodes(ctx):
             try:
@@ -588,4 +588,5 @@ async def main():
     print(json.dumps(await a.extract(), indent=4))
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
