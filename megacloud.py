@@ -202,18 +202,22 @@ class Resolvers:
         raw_values = []
 
         if indexes:
-            map_ = _re(Patterns.GET_KEY_FUNC_MAP, s.script)
-            map_arg = map_.group(1)
-            map_body = map_.group(2)
+            raw_values = indexes
 
-            if m := _re(Patterns.APPLY_OP, map_body, default=None):
+            map_ = _re(Patterns.GET_KEY_FUNC_MAP, s.script, default=None)
+            if map_:
+                map_arg = map_.group(1)
+                map_body = map_.group(2)
+
+                apply_op = _re(Patterns.APPLY_OP, map_body)
                 opcode = _re(Patterns.SET_DEF_OPCODE, map_body).group(1)
+
                 func = s.compute_op[int(opcode)]
 
-                var_name = m.group(1) if m.group(1) != map_arg else m.group(2)
+                var_name = apply_op.group(1) if apply_op.group(1) != map_arg else apply_op.group(2)
                 var_value = s._var_to_num(var_name, s.script)
 
-                raw_values = [func(int(var_value), int(i)) for i in indexes]
+                raw_values = [func(int(var_value), int(i)) for i in raw_values]
 
         elif keys:
             map_ = _re(Patterns.GET_KEY_FUNC_MAP, s.script)
@@ -579,7 +583,7 @@ class Megacloud:
 
 
 async def main():
-    url = "https://megacloud.blog/embed-2/v2/e-1/uz15BP6k7lg8?k=1&autoPlay=1&oa=0&asi=1"
+    url = "https://megacloud.blog/embed-2/v2/e-1/PW89EjsIG6qG?k=1&autoPlay=1&oa=0&asi=1"
     a = Megacloud(url)
     print(json.dumps(await a.extract(), indent=4))
 
