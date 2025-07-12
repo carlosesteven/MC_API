@@ -342,6 +342,23 @@ def _re(pattern: Patterns, string: str, *, all: bool = False, default: T = DEFAU
     return v
 
 
+def convert_to_js_operation(tokens: list[str]) -> str:
+    _tokens = []
+
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in ">><<":
+            next_token = tokens[i + 1]
+            token = f"{token} ({next_token} & 31)"
+            i += 1
+
+        _tokens.append(token)
+        i += 1
+
+    return "".join(_tokens)
+
+
 def derive_key_and_iv(password: bytes) -> tuple[bytes, bytes]:
     hashes = []
     digest = password
@@ -397,12 +414,7 @@ class Megacloud:
 
     def _generate_op_func(self, operation: str) -> Callable:
         operation = re.sub(r"[\w$]{2}", "args", operation)
-        if any(i in operation for i in (">", "<")):
-            v = operation.split()
-            v[-1] = f"({v[-1]} & 31)"
-            operation = " ".join(v)
-
-        return lambda *args: eval(operation)
+        return lambda *args: eval(convert_to_js_operation(operation.split()))
 
     def _get_operations(self) -> dict[int, Callable]:
         functions = {}
@@ -438,8 +450,11 @@ class Megacloud:
 
         return opcodes
 
-    def _apply_op(self, args: Iterable, ctx: str) -> int:
+    def _apply_op(self, args: Iterable, *, ctx: str, opcode: int | None = None) -> int:
         args = list(map(int, args))
+
+        if opcode is not None:
+            return self.compute_op[opcode](*args)
 
         for o in self._get_opcodes(ctx):
             try:
@@ -466,7 +481,7 @@ class Megacloud:
             if len(digits) == 1:
                 return str(digits[0])
 
-            return str(self._apply_op(digits, ctx))
+            return str(self._apply_op(digits, ctx=ctx))
 
         return var
 
@@ -474,40 +489,28 @@ class Megacloud:
         values = list(filter(None, values))
 
         if len(values) == 1 or not values[1].isdigit():
-            if len(values) == 2:
-                expression = values[-1].split()
-
-                operator = expression[0]
-                operand = self._var_to_num(expression[-1], ctx)
-
-                if any(i in operator for i in (">", "<")):
-                    operand = f"({operand} & 31)"
-
-                values[-1] = f"{operator} {operand}"
-                i = eval("".join(values))
-
-            else:
-                i = int(self._var_to_num(values[0], ctx))
-
-            v = self.string_array[i]
+            i = int(self._var_to_num(values[0], ctx))
+            return self.string_array[i]
 
         elif len(values) > 1:
-            i1 = int(self._var_to_num(values[0], ctx))
-            i2 = int(self._var_to_num(values[1], ctx))
-
-            if len(values) == 3:
-                opcode = int(self._var_to_num(values[2], ctx))
-                i = self.compute_op[opcode](i1, i2)
+            if not values[1].isdigit():
+                i = eval(convert_to_js_operation(values))
 
             else:
-                i = self._apply_op((i1, i2), ctx)
+                i1 = int(self._var_to_num(values[0], ctx))
+                i2 = int(self._var_to_num(values[1], ctx))
 
-            v = self.string_array[i]
+                if len(values) == 3:
+                    opcode = int(self._var_to_num(values[2], ctx))
 
-        else:
-            raise ValueError(f"can't get {values}")
+                else:
+                    opcode = None
 
-        return v
+                i = self._apply_op((i1, i2), ctx=ctx, opcode=opcode)
+
+            return self.string_array[i]
+
+        raise ValueError(f"can't get {values}")
 
     def _resolve_key(self) -> bytes:
         ctx = _re(Patterns.GET_KEY_CTX, self.script).group(1)
@@ -583,7 +586,7 @@ class Megacloud:
 
 
 async def main():
-    url = "https://megacloud.blog/embed-2/v2/e-1/PW89EjsIG6qG?k=1&autoPlay=1&oa=0&asi=1"
+    url = "	https://megacloud.blog/embed-2/v2/e-1/vDWM9P1PKaYN?k=1&autoPlay=1&oa=0&asi=1"
     a = Megacloud(url)
     print(json.dumps(await a.extract(), indent=4))
 
