@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import time
 import json
@@ -13,6 +14,83 @@ HEXDIGITS = "0123456789abcdef"
 
 T = TypeVar("T")
 _KeyPair: TypeAlias = tuple[list[str], list[int]]
+
+
+@overload
+def _re(pattern: "Patterns", string: str) -> re.Match: ...
+@overload
+def _re(pattern: "Patterns", string: str, *, default: T) -> re.Match | T: ...
+@overload
+def _re(pattern: "Patterns", string: str, *, all: Literal[True]) -> list: ...
+@overload
+def _re(pattern: "Patterns", string: str, *, all: Literal[True], default: T) -> list | T: ...
+
+
+def _re(pattern: "Patterns", string: str, *, all: bool = False, default: T = DEFAULT) -> re.Match | list | T:
+    v = re.findall(pattern.formatted, string) if all else re.search(pattern.formatted, string)
+
+    if not v and default is DEFAULT:
+        msg = f"{pattern.name} not found"
+        raise ValueError(msg)
+
+    elif not v:
+        return default
+
+    return v
+
+
+async def make_request(url: str, headers: dict, params: dict, func: Callable[[aiohttp.ClientResponse], Awaitable[T]]) -> T:
+    async with aiohttp.ClientSession() as client:
+        async with client.get(url, headers=headers, params=params) as resp:
+            return await func(resp)
+
+
+def hash(key: str) -> int:
+    key_value = 0
+    for char in key:
+        key_value = (key_value * 31 + ord(char)) & 0xFFFFFFFF
+
+    return key_value
+
+
+def hash_float(key: str) -> float:
+    result = 0
+    value = 47
+
+    for char in key:
+        result = ord(char) + result * value + (result << 7) - result
+
+    return float(result % 0x7FFFFFFFFFFFFFFF)
+
+
+def arr_split(s):
+    parts = []
+    current = []
+    depth = 0
+    for char in s:
+        if char == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            current.append(char)
+    if current:
+        parts.append("".join(current).strip())
+    return parts
+
+
+def generate_index_sequence(n: int) -> list[int]:
+    result = [5, 8, 14, 11]
+    if n <= 4:
+        return result
+
+    for i in range(2, n - 2):
+        result.append(result[i] + i + 3 - (i % 2))
+
+    return result
 
 
 class ResolverFlags(IntEnum):
@@ -88,7 +166,7 @@ class Patterns(StrEnum):
         return getattr(self, "_fmted", self.value)
 
 
-class Resolvers:
+class KeyResolver:
     @staticmethod
     def _get_key(s: "Megacloud") -> str:
         fcall = _re(Patterns.KEY_VAR, s.script).group(1)
@@ -290,9 +368,9 @@ class Resolvers:
 
         for func in to_try:
             try:
-                res = func(s)
-                if res[0]:
-                    return res
+                result = func(s)
+                if result[0]:
+                    return result
                 continue
 
             except ValueError:
@@ -325,132 +403,53 @@ class Resolvers:
         return "".join(key)
 
 
-class KeyModifiers:
-    def __init__(self, key: str, client_key: str) -> None:
-        self.key = key
+class KeyModifier:
+    def __init__(self, secret_key: str, client_key: str) -> None:
+        self.secret_key = secret_key
         self.client_key = client_key
-        self.full_key = key + client_key
+        self.key = secret_key + client_key
 
-        self.iter_count = 4
+    def __iter__(self):
+        self.__current = 4
+        return self
 
-    def modify(self) -> str:
+    def __next__(self):
+        if self.__current == 1:
+            raise StopIteration
+
+        self.__current -= 1
+        return self.__current
+
+    def apply(self) -> str:
         # surely it doesn't depend on key + client_id length
 
-        match len(self.full_key):
+        match len(self.key):
             case 98:
-                self.full_key = self.utf8()
+                self.key = self._apply_utf8_transformation()
 
-        return self.sum()
+        return self._append_iter()
 
-    def sum(self) -> str:
-        self.iter_count -= 1
-        return f"{self.full_key}{self.iter_count}"
+    def _append_iter(self) -> str:
+        return f"{self.key}{self.__current}"
 
-    def utf8(self) -> str:
+    def _apply_utf8_transformation(self) -> str:
+        result = []
+
         client_key = list(reversed(self.client_key))
+        key = [chr(ord(char) ^ 15835827 & 0xFF) for char in self.key]
 
-        key = [chr(ord(char) ^ 15835827 & 0xFF) for char in self.full_key]
-        slice = int(hash2(self.full_key) % len(key)) + 7
-        key = key[slice:] + key[:slice]
+        slice1 = int(hash_float(self.key) % len(key)) + 7
+        slice2 = int(hash_float(self.key) % 33) + 96
 
-        key_ = []
+        key = key[slice1:] + key[:slice1]
+
         for i, char in enumerate(key):
-            key_.append(char)
+            result.append(char)
             if i < len(client_key):
-                key_.append(client_key[i])
+                result.append(client_key[i])
 
-        slice = int(hash2(self.full_key) % 33) + 96
-        key = map(lambda char: chr((ord(char) % 95) + 32), key_[:slice])
-        return "".join(key)
-
-
-async def make_request(url: str, headers: dict, params: dict, func: Callable[[aiohttp.ClientResponse], Awaitable[T]]) -> T:
-    async with aiohttp.ClientSession() as client:
-        async with client.get(url, headers=headers, params=params) as resp:
-            return await func(resp)
-
-
-def hash(key: str) -> int:
-    key_value = 0
-    for char in key:
-        key_value = (key_value * 31 + ord(char)) & 0xFFFFFFFF
-
-    return key_value
-
-
-def hash2(key: str) -> float:
-    res = 0
-    value = 47
-
-    for char in key:
-        res = ord(char) + res * value + (res << 7) - res
-
-    return float(res % 0x7FFFFFFFFFFFFFFF)
-
-
-def isint(n) -> bool:
-    if isinstance(n, int) or isinstance(n, str) and n.startswith("0x"):
-        return True
-
-    try:
-        int(n)
-        return True
-
-    except ValueError:
-        return False
-
-
-@overload
-def _re(pattern: Patterns, string: str) -> re.Match: ...
-@overload
-def _re(pattern: Patterns, string: str, *, default: T) -> re.Match | T: ...
-@overload
-def _re(pattern: Patterns, string: str, *, all: Literal[True]) -> list: ...
-@overload
-def _re(pattern: Patterns, string: str, *, all: Literal[True], default: T) -> list | T: ...
-
-
-def _re(pattern: Patterns, string: str, *, all: bool = False, default: T = DEFAULT) -> re.Match | list | T:
-    v = re.findall(pattern.formatted, string) if all else re.search(pattern.formatted, string)
-
-    if not v and default is DEFAULT:
-        msg = f"{pattern.name} not found"
-        raise ValueError(msg)
-
-    elif not v:
-        return default
-
-    return v
-
-
-def arr_split(s):
-    parts = []
-    current = []
-    depth = 0
-    for char in s:
-        if char == "," and depth == 0:
-            parts.append("".join(current).strip())
-            current = []
-        else:
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth -= 1
-            current.append(char)
-    if current:
-        parts.append("".join(current).strip())
-    return parts
-
-
-def generate_sequence(n: int) -> list[int]:
-    res = [5, 8, 14, 11]
-    if n <= 4:
-        return res
-
-    for i in range(2, n - 2):
-        res.append(res[i] + i + 3 - (i % 2))
-
-    return res
+        result = map(lambda char: chr((ord(char) % 95) + 32), result[:slice2])
+        return "".join(result)
 
 
 class Megacloud:
@@ -499,7 +498,7 @@ class Megacloud:
 
     def _get_array_slices(self) -> list[tuple[int, ...]]:
         pairs = tuple(map(lambda t: tuple(map(int, t)), _re(Patterns.SLICES, self.script, all=True)))
-        order_map = {v: i for i, v in enumerate(generate_sequence(len(pairs)))}
+        order_map = {v: i for i, v in enumerate(generate_index_sequence(len(pairs)))}
 
         pairs = list(sorted(pairs, key=lambda t: order_map[t[0]]))
         return pairs
@@ -521,11 +520,6 @@ class Megacloud:
             opcodes = [0]
 
         return opcodes
-
-    @overload
-    def _apply_op(self, args: Iterable, *, ctx: str | None = None, opcode: int | None) -> int: ...
-    @overload
-    def _apply_op(self, args: Iterable, *, ctx: str | None, opcode: int | None = None) -> int: ...
 
     def _apply_op(self, args: Iterable, *, ctx: str | None = None, opcode: int | None = None) -> int:
         args = list(args)
@@ -576,13 +570,13 @@ class Megacloud:
             if len(digits) == 1:
                 return str(digits[0])
 
-            res = self._apply_op(digits, ctx=ctx)
+            result = self._apply_op(digits, ctx=ctx)
 
-            if not res:
+            if not result:
                 var_value = " ".join(map(lambda t: m.group(1) if (m := re.search(r"(\d+)", t)) else t, var_value.split()))
-                res = eval(self._convert_to_js_operation(var_value))
+                result = eval(self._convert_to_js_operation(var_value))
 
-            return str(res)
+            return str(result)
 
         return var
 
@@ -613,7 +607,7 @@ class Megacloud:
 
         raise ValueError(f"can't get {values}")
 
-    def _resolve_key(self) -> str:
+    def _resolve_secret_key(self) -> str:
         ctx = _re(Patterns.GET_KEY_CTX, self.script).group(1)
         get_key_body = _re(Patterns.GET_KEY_FUNC, ctx).group(2)
 
@@ -636,7 +630,7 @@ class Megacloud:
         if not flags:
             flags = ResolverFlags.FALLBACK
 
-        return Resolvers.resolve(flags, self)
+        return KeyResolver.resolve(flags, self)
 
     def _lcg(self, n: int) -> int:
         # linear congruential generator ??
@@ -697,25 +691,9 @@ class Megacloud:
 
         return self._shuffle_sources(new_sources, key)
 
-    def _decrypt_sources(self, key: str, client_key: str, sources: str) -> dict:
-        _sources = list(base64.b64decode(sources).decode())
-        key_mod = KeyModifiers(key, client_key)
+    async def _extract_client_key(self) -> str:
+        # return "cNdO8Wdzo37owK7m766AWPgDlpnpNe9Dh3DBJg6TNAQKrdvT"
 
-        for _ in reversed(range(1, key_mod.iter_count)):
-            _key = key_mod.modify()
-
-            _sources = self._process_sources(_sources, _key)
-            _key = self._shuffle_key(_key)
-
-            _key_to_ascii = {char: chr(i + 32) for i, char in enumerate(_key)}
-            _sources = list(map(lambda char: _key_to_ascii[char], _sources))
-
-        _sources = "".join(_sources)
-        _sources = _re(Patterns.SOURCES, _sources).group(1)
-
-        return json.loads(_sources)
-
-    async def _get_client_key(self) -> str:
         resp = await make_request(self.embed_url, self.headers, {}, lambda r: r.text())
 
         try:
@@ -725,7 +703,7 @@ class Megacloud:
         except ValueError:
             raise
 
-    async def _get_secret_key(self) -> str:
+    async def _extract_secret_key(self) -> str:
         script_url = f"{self.base_url}/js/player/a/v3/pro/embed-1.min.js"
         self.script = await make_request(script_url, {}, {"v": int(time.time())}, lambda i: i.text())
 
@@ -749,19 +727,38 @@ class Megacloud:
         self.string_array = self._shuffle_array(string_array)
         self.compute_op = self._get_operations()
 
-        key = self._resolve_key()
+        key = self._resolve_secret_key()
         assert key
         return key
+
+    def _decrypt_sources(self, secret_key: str, client_key: str, sources: str) -> dict:
+        sources_list = list(base64.b64decode(sources).decode())
+        key_mod = KeyModifier(secret_key, client_key)
+
+        for _ in key_mod:
+            modified_key = key_mod.apply()
+
+            sources_list = self._process_sources(sources_list, modified_key)
+            shuffled_key = self._shuffle_key(modified_key)
+
+            key_to_ascii_map = {char: chr(i + 32) for i, char in enumerate(shuffled_key)}
+            sources_list = list(map(lambda char: key_to_ascii_map[char], sources_list))
+
+        sources = "".join(sources_list)
+        sources = _re(Patterns.SOURCES, sources).group(1)
+
+        return json.loads(sources)
 
     async def extract(self) -> dict:
         id = _re(Patterns.SOURCE_ID, self.embed_url).group(1)
         get_src_url = f"{self.base_url}/embed-2/v3/e-1/getSources"
 
-        client_key = await self._get_client_key()
+        client_key = await self._extract_client_key()
         resp = await make_request(get_src_url, self.headers, {"id": id, "_k": client_key}, lambda i: i.json())
 
-        key = await self._get_secret_key()
-        sources = self._decrypt_sources(key, client_key, resp["sources"])
+        secret_key = await self._extract_secret_key()
+
+        sources = self._decrypt_sources(secret_key, client_key, resp["sources"])
 
         resp["sources"] = sources
 
@@ -769,3 +766,12 @@ class Megacloud:
         resp["outro"] = resp["outro"]["start"], resp["outro"]["end"]
 
         return resp
+
+
+async def main():
+    m = Megacloud("https://megacloud.blog/embed-2/v3/e-1/pkpZzfTrd8m8?k=1&autoPlay=1&oa=0&asi=1")
+    print(await m.extract())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
