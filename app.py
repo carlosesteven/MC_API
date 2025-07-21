@@ -1,27 +1,22 @@
-import asyncio
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from megacloud import Megacloud
 
-app = Flask(__name__)
-
-CORS(app)
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/api")
-def api():
-    file_id = request.args.get("id")
-    if not file_id:
-        return jsonify({"error": "missing id"}), 400
-    version = request.args.get("version")
-    if not version:
-        return jsonify({"error": "missing version"}), 400
-    url = f"https://megacloud.blog/embed-2/{version}/e-1/{file_id}?k=1&autoPlay=1&oa=0&asi=1"
+async def api(id: str, version: str):
+    url = f"https://megacloud.blog/embed-2/{version}/e-1/{id}?k=1&autoPlay=1&oa=0&asi=1"
     m = Megacloud(url)
     try:
-        data = asyncio.run(m.extract())
+        data = await m.extract()
+        return JSONResponse(content=data)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    return jsonify(data)
-
-if __name__ == "__main__":
-    app.run(port=8446)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
