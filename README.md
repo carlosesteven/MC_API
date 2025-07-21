@@ -5,9 +5,11 @@ A simple Flask-based API for extracting streaming sources from Megacloud by file
 ## Requirements
 
 - Python 3.11
-- Flask
 - aiohttp
-- flask-cors
+- fastapi
+- uvicorn
+
+pip install fastapi uvicorn aiohttp
 
 ## Installation
 
