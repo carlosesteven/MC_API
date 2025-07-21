@@ -25,7 +25,7 @@ A MC API for extracting streaming sources from MC by file ID.
 
 To run the server, simply execute:
 
-    clear && python3.11 -m uvicorn app:app --host 0.0.0.0 --port 8446
+    clear && python -m uvicorn app:app --host 0.0.0.0 --port 8446
 
 By default, Server will the API at http://127.0.0.1:8446.
 
@@ -57,7 +57,7 @@ By default, Server will the API at http://127.0.0.1:8446.
 
 4. Run the project:
 
-       python3.11 -m uvicorn app:app --host 0.0.0.0 --port 8446
+       python -m uvicorn app:app --host 0.0.0.0 --port 8446
 
 5. Deactivate the virtual environment (optional):
 
