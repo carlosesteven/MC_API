@@ -86,6 +86,6 @@ To run your Flask server in the background and keep it running after closing the
 
 3. Stop the Server
 
-   kill '<pid>'
+   kill pid
 
    This command will stop all running processes that match app.py.
