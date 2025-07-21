@@ -7,7 +7,7 @@ Requirements
 - Python 3.11
 - Flask
 - aiohttp
-- Any other dependencies required by your megacloud.py script
+- flask-cors
 
 Installation
 
@@ -30,7 +30,7 @@ To run the server, simply execute:
 
 clear && python3.11 app.py
 
-By default, Flask will serve the API at http://127.0.0.1:5000.
+By default, Flask will serve the API at http://127.0.0.1:8446.
 
 API Endpoint
 
@@ -38,7 +38,7 @@ API Endpoint
 
 Example:
 
-GET http://127.0.0.1:5000/api?id=2YrU0L35i6Uj
+GET http://127.0.0.1:8446/api?id=2YrU0L35i6Uj
 
 Response:
 Returns a JSON with the extracted video sources and additional metadata.
