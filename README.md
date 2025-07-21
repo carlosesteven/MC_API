@@ -1,4 +1,4 @@
-Megacloud Flask API
+# MC Flask API
 
 A simple Flask-based API for extracting streaming sources from Megacloud by file ID.
 
@@ -47,3 +47,33 @@ Project Structure
 
 - app.py — Main Flask server file (contains the API).
 - megacloud.py — Contains the Megacloud class and decryption logic.
+
+# Running the Project with Python 3.11 (Safe Install)
+
+Never install dependencies globally on a production server! Always use a virtual environment.
+
+1. Create a virtual environment with Python 3.11:
+
+   python3.11 -m venv venv
+
+2. Activate the virtual environment:
+
+   source venv/bin/activate
+
+3. Install the project dependencies:
+
+   pip install -r requirements.txt
+   (Or manually: pip install flask flask-cors aiohttp)
+
+4. Run the project:
+
+   python app.py
+   (Replace app.py with your entry file if different.)
+
+5. Deactivate the virtual environment (optional):
+
+   deactivate
+
+Note:  
+All Python packages will be installed locally in the venv folder.  
+This will NOT affect your system Python or any other projects.
