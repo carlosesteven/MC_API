@@ -786,12 +786,3 @@ class Megacloud:
         resp["outro"] = resp["outro"]["start"], resp["outro"]["end"]
 
         return resp
-
-
-async def main():
-    m = Megacloud("https://megacloud.blog/embed-2/v3/e-1/2YrU0L35i6Uj?k=1&autoPlay=1&oa=0&asi=1")
-    print(await m.extract())
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
