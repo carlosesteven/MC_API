@@ -31,20 +31,15 @@ By default, Server will the API at http://127.0.0.1:8446.
 
 ## API Endpoint
 
-    GET /api?id=<file_id>
+    GET /api?id=<file_id>&version=<version>
 
 ## Example:
 
-    GET http://127.0.0.1:8446/api?id=2YrU0L35i6Uj
+    GET http://127.0.0.1:8446/api?id=XXXXXX&version=XX
 
 ## Response:
 
     Returns a JSON with the extracted video sources and additional metadata.
-
-## Project Structure
-
-- app.py — Main Flask server file (contains the API).
-- megacloud.py — Contains the Megacloud class and decryption logic.
 
 # Running the Project with Python 3.11
 
@@ -82,10 +77,10 @@ To run your Flask server in the background and keep it running after closing the
 
    ps aux | grep uvicorn
 
-   This will show you the process ID (PID) of the running app.py server.
+This will show you the process ID (PID) of the running app.py server.
 
 3. Stop the Server
 
    kill pid
 
-   This command will stop all running processes that match app.py.
+This command will stop all running processes that match app.py.
