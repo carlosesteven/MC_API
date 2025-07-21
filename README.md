@@ -2,14 +2,14 @@
 
 A simple Flask-based API for extracting streaming sources from Megacloud by file ID.
 
-Requirements
+## Requirements
 
 - Python 3.11
 - Flask
 - aiohttp
 - flask-cors
 
-Installation
+## Installation
 
 1. Clone this repository
    git clone <your-repo-url>
@@ -24,7 +24,7 @@ Installation
 
    If your megacloud.py requires additional dependencies, install them as well.
 
-Usage
+## Usage
 
 To run the server, simply execute:
 
@@ -32,25 +32,24 @@ clear && python3.11 app.py
 
 By default, Flask will serve the API at http://127.0.0.1:8446.
 
-API Endpoint
+## API Endpoint
 
 - GET /api?id=<file_id>
 
-Example:
+## Example:
 
 GET http://127.0.0.1:8446/api?id=2YrU0L35i6Uj
 
-Response:
+## Response:
+
 Returns a JSON with the extracted video sources and additional metadata.
 
-Project Structure
+## Project Structure
 
 - app.py — Main Flask server file (contains the API).
 - megacloud.py — Contains the Megacloud class and decryption logic.
 
-# Running the Project with Python 3.11 (Safe Install)
-
-Never install dependencies globally on a production server! Always use a virtual environment.
+# Running the Project with Python 3.11
 
 1. Create a virtual environment with Python 3.11:
 
@@ -70,10 +69,26 @@ Never install dependencies globally on a production server! Always use a virtual
    python app.py
    (Replace app.py with your entry file if different.)
 
-5. Deactivate the virtual environment (optional):
+# Running Flask Server in Background (Linux)
 
-   deactivate
+To run your Flask server in the background and keep it running after closing the terminal, use the following commands:
 
-Note:  
-All Python packages will be installed locally in the venv folder.  
-This will NOT affect your system Python or any other projects.
+1. Start the Server in Background
+
+nohup python app.py > flask.log 2>&1 &
+
+This command will start the server in the background.
+All output (including errors) will be written to flask.log.
+The process will keep running even if you close your terminal.
+
+2. Check if the Server is Running
+
+ps aux | grep app.py
+
+This will show you the process ID (PID) of the running app.py server.
+
+3. Stop the Server
+
+pkill -f app.py
+
+This command will stop all running processes that match app.py.
