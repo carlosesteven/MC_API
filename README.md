@@ -77,14 +77,14 @@ To run your Flask server in the background and keep it running after closing the
 
        ps aux | grep uvicorn
 
-   OR
-
-       pkill -f "uvicorn app:app"
-
    This will show you the process ID (PID) of the running app.py server.
 
 4. Stop the Server
 
        kill pid
+
+   OR
+
+       pkill -f "uvicorn app:app"
 
    This command will stop all running processes that match app.py.
