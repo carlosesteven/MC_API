@@ -1,4 +1,4 @@
-# MC Flask API
+# MC API
 
 A simple Flask-based API for extracting streaming sources from Megacloud by file ID.
 
