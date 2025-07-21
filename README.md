@@ -14,12 +14,12 @@ A MC API for extracting streaming sources from MC by file ID.
 
 1. Clone this repository
 
-   git clone megacloudpy
-   cd megacloudpy
+       git clone megacloudpy
+       cd megacloudpy
 
 2. Install dependencies
 
-   pip install fastapi uvicorn aiohttp
+       pip install fastapi uvicorn aiohttp
 
 ## Usage
 
@@ -45,23 +45,23 @@ By default, Server will the API at http://127.0.0.1:8446.
 
 1. Create a virtual environment with Python 3.11:
 
-   python3.11 -m venv venv
+       python3.11 -m venv venv
 
 2. Activate the virtual environment:
 
-   source venv/bin/activate
+       source venv/bin/activate
 
 3. Install the project dependencies:
 
-   pip install fastapi uvicorn aiohttp
+       pip install fastapi uvicorn aiohttp
 
 4. Run the project:
 
-   python3.11 -m uvicorn app:app --host 0.0.0.0 --port 8446
+       python3.11 -m uvicorn app:app --host 0.0.0.0 --port 8446
 
 5. Deactivate the virtual environment (optional):
 
-   deactivate
+       deactivate
 
 # Running Flask Server in Background (Linux)
 
@@ -69,18 +69,18 @@ To run your Flask server in the background and keep it running after closing the
 
 1. Start the Server in Background
 
-   nohup python -m uvicorn app:app --host 0.0.0.0 --port 8446 > /dev/null 2>&1 &
+       nohup python -m uvicorn app:app --host 0.0.0.0 --port 8446 > /dev/null 2>&1 &
 
    This command will start the server in the background.
 
 2. Check if the Server is Running
 
-   ps aux | grep uvicorn
+       ps aux | grep uvicorn
 
    This will show you the process ID (PID) of the running app.py server.
 
 3. Stop the Server
 
-   kill pid
+       kill pid
 
    This command will stop all running processes that match app.py.
