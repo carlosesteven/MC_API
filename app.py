@@ -12,7 +12,10 @@ def api():
     file_id = request.args.get("id")
     if not file_id:
         return jsonify({"error": "missing id"}), 400
-    url = f"https://megacloud.blog/embed-2/v3/e-1/{file_id}?k=1&autoPlay=1&oa=0&asi=1"
+    version = request.args.get("version")
+    if not version:
+        return jsonify({"error": "missing version"}), 400
+    url = f"https://megacloud.blog/embed-2/{version}/e-1/{file_id}?k=1&autoPlay=1&oa=0&asi=1"
     m = Megacloud(url)
     try:
         data = asyncio.run(m.extract())
