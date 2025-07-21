@@ -5,11 +5,10 @@ A simple Flask-based API for extracting streaming sources from Megacloud by file
 ## Requirements
 
 - Python 3.11
+
 - aiohttp
 - fastapi
 - uvicorn
-
-pip install fastapi uvicorn aiohttp
 
 ## Installation
 
@@ -63,13 +62,11 @@ Returns a JSON with the extracted video sources and additional metadata.
 
 3. Install the project dependencies:
 
-   pip install -r requirements.txt
-   (Or manually: pip install flask flask-cors aiohttp)
+   pip install fastapi uvicorn aiohttp
 
 4. Run the project:
 
-   python app.py
-   (Replace app.py with your entry file if different.)
+   python3.11 -m uvicorn app:app --host 0.0.0.0 --port 8446
 
 # Running Flask Server in Background (Linux)
 
@@ -77,20 +74,18 @@ To run your Flask server in the background and keep it running after closing the
 
 1. Start the Server in Background
 
-nohup python app.py > flask.log 2>&1 &
+   nohup python -m uvicorn app:app --host 0.0.0.0 --port 8446 > /dev/null 2>&1 &
 
-This command will start the server in the background.
-All output (including errors) will be written to flask.log.
-The process will keep running even if you close your terminal.
+   This command will start the server in the background.
 
 2. Check if the Server is Running
 
-ps aux | grep app.py
+   ps aux | grep uvicorn
 
-This will show you the process ID (PID) of the running app.py server.
+   This will show you the process ID (PID) of the running app.py server.
 
 3. Stop the Server
 
-pkill -f app.py
+   kill <pid>
 
-This command will stop all running processes that match app.py.
+   This command will stop all running processes that match app.py.
