@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from megacloud import Megacloud
 
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
