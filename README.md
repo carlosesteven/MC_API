@@ -15,9 +15,10 @@ A MC API for extracting streaming sources from MC by file ID.
 1. Clone this repository
 
        git clone https://github.com/carlosesteven/MC_API.git
-       cd megacloudpy
 
-2. Install dependencies
+       cd MC_API
+
+3. Install dependencies
 
        pip install fastapi uvicorn aiohttp
 
