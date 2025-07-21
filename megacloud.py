@@ -703,9 +703,25 @@ class Megacloud:
         except ValueError:
             raise
 
-    async def _extract_secret_key(self) -> str:
+    script_cache_path = "embed-1.min.js"
+
+    async def _load_script(self, force: bool = False) -> None:
+        if not force:
+            try:
+                with open(self.script_cache_path, "r") as f:
+                    self.script = f.read()
+                    return
+            except FileNotFoundError:
+                pass
+
         script_url = f"{self.base_url}/js/player/a/v3/pro/embed-1.min.js"
         self.script = await make_request(script_url, {}, {"v": int(time.time())}, lambda i: i.text())
+
+        with open(self.script_cache_path, "w") as f:
+            f.write(self.script)
+
+    async def _extract_secret_key(self, force: bool = False) -> str:
+        await self._load_script(force)
 
         if _re(Patterns.BIGINT, self.script, default=None):
             self.BIGINT_NUMBERS = True
@@ -758,7 +774,11 @@ class Megacloud:
 
         secret_key = await self._extract_secret_key()
 
-        sources = self._decrypt_sources(secret_key, client_key, resp["sources"])
+        try:
+            sources = self._decrypt_sources(secret_key, client_key, resp["sources"])
+        except Exception:
+            secret_key = await self._extract_secret_key(force=True)
+            sources = self._decrypt_sources(secret_key, client_key, resp["sources"])
 
         resp["sources"] = sources
 
@@ -769,7 +789,7 @@ class Megacloud:
 
 
 async def main():
-    m = Megacloud("https://megacloud.blog/embed-2/v3/e-1/pkpZzfTrd8m8?k=1&autoPlay=1&oa=0&asi=1")
+    m = Megacloud("https://megacloud.blog/embed-2/v3/e-1/2YrU0L35i6Uj?k=1&autoPlay=1&oa=0&asi=1")
     print(await m.extract())
 
 
