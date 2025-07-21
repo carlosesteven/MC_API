@@ -68,6 +68,10 @@ Returns a JSON with the extracted video sources and additional metadata.
 
    python3.11 -m uvicorn app:app --host 0.0.0.0 --port 8446
 
+5. Deactivate the virtual environment (optional):
+
+   deactivate
+
 # Running Flask Server in Background (Linux)
 
 To run your Flask server in the background and keep it running after closing the terminal, use the following commands:
