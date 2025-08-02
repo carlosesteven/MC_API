@@ -7,7 +7,7 @@ import re
 import aiohttp
 
 from typing import Awaitable, Callable, Iterable, TypeVar, overload, Literal, TypeAlias
-from enum import StrEnum, IntEnum
+from enum import StrEnum, IntFlag
 
 DEFAULT = object()
 HEXDIGITS = "0123456789abcdef"
@@ -55,12 +55,19 @@ def hash(key: str) -> int:
 
 def hash_float(key: str) -> float:
     result = 0
-    value = 47
+    m = int((16 * len(key) - 863) / 15)
 
     for char in key:
-        result = ord(char) + result * value + (result << 7) - result
+        result = ord(char) + result * (m + 127)
 
     return float(result % 0x7FFFFFFFFFFFFFFF)
+
+
+def compute_xor_value(key_len: int) -> int:
+    base = 81
+    max_val = 255
+    k = (max_val - base) // key_len
+    return base + key_len * k
 
 
 def arr_split(s):
@@ -93,7 +100,7 @@ def generate_index_sequence(n: int) -> list[int]:
     return result
 
 
-class ResolverFlags(IntEnum):
+class ResolverFlags(IntFlag):
     FALLBACK = 1
     REVERSE = 1 << 1
     FROMCHARCODE = 1 << 2
@@ -109,19 +116,19 @@ class Patterns(StrEnum):
 
     BIGINT = f"12345n"
 
-    CLIENT_KEY = r'([A-z0-9]{48})|x: "([A-z0-9]{16})", y: "([A-z0-9]{16})", z: "([A-z0-9]{16})"};'
-    SOURCE_ID = r"embed-2/v3/e-1/([A-z0-9]+)\?"
+    CLIENT_KEY = r'([a-zA-Z0-9]{48})|x: "([a-zA-Z0-9]{16})", y: "([a-zA-Z0-9]{16})", z: "([a-zA-Z0-9]{16})"};'
+    SOURCE_ID = r"embed-2/v3/e-1/([a-zA-Z0-9]+)\?"
     SOURCES = r'(\[.+?"hls"}\])'
 
     IDX = r'(?<=[\(",])(\d+)'
-    VAR = r"(?:^|[ ;])%%name%%=([^;]+);|[\(,]%%name%% = ([^\)]+)\)"
+    VAR = r"(?:^|[ ;{])%%name%%=([^;]+);|[\(,]%%name%% = ([^\)]+)\)"
     DICT = r"[\w$]{2}=\{\}"
 
     XOR_KEY = r"\)\('(.+)'\)};"
     STRING = r"function [\w$]{2}\(\){return \"(.+?)\";}"
     DELIMITER = r"[\w$]{3}=\w\.[\w$]{2}\([\w$]{3},'(.)'\);"
 
-    SET_DEFAULT_OPCODE = rf"{_FUNC}\((\d+)\)"
+    SET_DEFAULT_OPCODE = rf"{_FUNC}\(([0-9]|1[0-6])\)"
 
     COMPUTE_OP_FUNC = r"\w\[\d+\]=\(function\([\w$]+\)[{\d\w$:\(\),= ]+;switch\([\w$]+\){([^}]+)}"
     OPERATION = r"case (\d+):([\w\[\]\-+|><^*\/&% =$\(\)]+);break;"
@@ -145,7 +152,7 @@ class Patterns(StrEnum):
     APPLY_OP = rf"{_FUNC}\((\w+),(\w+)\)"
     APPLY_OP_SPEC = rf'{_FUNC}\("?(\d+)"?,"?(\d+)"?,{_FUNC}\((\d)\)\)'
 
-    GET_KEY_CTX = r"var (?:[\w$]{1,2},?){28,};(.+?)try"
+    GET_KEY_CTX = rf"var (?:[\w$]{{1,2}},?){{28,}};.+?({SET_DEFAULT_OPCODE};\w=.+?)try"
     GET_KEY_FUNC = r"(\w)=\(\)=>{(.+?)};"
     GET_KEY_FUNC_RETURN = r"return(.+?);[\}\)]"
     GET_KEY_FUNC_MAP = r"\((\w+)=>{(.+?return.+?;)"
@@ -153,6 +160,11 @@ class Patterns(StrEnum):
     DICT_SET1 = rf"[\w$]{{2}}\[(?:{GET})\]=({GET})"
     DICT_SET2 = rf"[\w$]{{2}}\[(?:{GET})\]=\(\)=>({{.+?return {GET})"
     DICT_SET = f"{DICT_SET1}|{DICT_SET2}"
+
+    KEY_TRANSFORM_CTX = rf"[A-Za-z]=\([\w$]{{2}},[\w$]{{2}}\)=>{{if\({_FUNC}\(\)\){{var (?:[\w$]{{2}},?){{12}}(.+?return)"
+    KEY_TRANSFORM_MULTIPLIER = r'[\w$]{2}=[\w$]{5}\(\+?"?(\d+)"?\)'
+    KEY_TRANSFORM_XOR_VALUE = r'[\w$]{2}=[\w$]{5}\(\+?"?(\d+)"?\)'
+    KEY_TRANSFORM_SUMMAND = r'[\w$]{2} % [\w$]{2}\[.+?"(\d+)"'
 
     def fmt(self, **kwargs) -> "Patterns":
         for k, v in kwargs.items():
@@ -379,7 +391,7 @@ class KeyResolver:
         return [], []
 
     @classmethod
-    def resolve(cls, flags: int, s: "Megacloud") -> str:
+    def resolve(cls, flags: ResolverFlags, s: "Megacloud") -> str:
         key = ""
         keys, indexes = cls.map(s)
 
@@ -403,44 +415,42 @@ class KeyResolver:
         return "".join(key)
 
 
-class KeyModifier:
-    def __init__(self, secret_key: str, client_key: str) -> None:
+class KeyTransform:
+    def __init__(self, secret_key: str, client_key: str, script: str) -> None:
         self.secret_key = secret_key
         self.client_key = client_key
+        self.script = script
         self.key = secret_key + client_key
 
     def __iter__(self):
-        self.__current = 4
+        self.__c = 4
         return self
 
     def __next__(self):
-        if self.__current == 1:
+        if self.__c == 1:
             raise StopIteration
 
-        self.__current -= 1
-        return self.__current
+        self.__c -= 1
+        return self.__c
 
     def apply(self) -> str:
-        # surely it doesn't depend on key + client_id length
+        # apply only if it wasnt applied before
+        if self.key == self.secret_key + self.client_key:
+            self.key = self._apply()
 
-        match len(self.key):
-            case 98:
-                self.key = self._apply_utf8_transformation()
+        return f"{self.key}{self.__c}"
 
-        return self._append_iter()
-
-    def _append_iter(self) -> str:
-        return f"{self.key}{self.__current}"
-
-    def _apply_utf8_transformation(self) -> str:
+    def _apply(self) -> str:
         result = []
-
         client_key = list(reversed(self.client_key))
-        key = [chr(ord(char) ^ 15835827 & 0xFF) for char in self.key]
 
-        slice1 = int(hash_float(self.key) % len(key)) + 7
-        slice2 = int(hash_float(self.key) % 33) + 96
+        key_hash = hash_float(self.key)
 
+        xor_value = compute_xor_value(len(self.key))
+        key = [chr(ord(char) ^ xor_value) for char in self.key]
+
+        summand = int(_re(Patterns.KEY_TRANSFORM_SUMMAND, self.script).group(1))
+        slice1 = int(key_hash % len(self.key)) + summand
         key = key[slice1:] + key[:slice1]
 
         for i, char in enumerate(key):
@@ -448,7 +458,9 @@ class KeyModifier:
             if i < len(client_key):
                 result.append(client_key[i])
 
+        slice2 = int(key_hash % 33) + 96
         result = map(lambda char: chr((ord(char) % 95) + 32), result[:slice2])
+
         return "".join(result)
 
 
@@ -618,7 +630,7 @@ class Megacloud:
                 string = self._get(i[1:], get_key_body)
                 functions.append(string)
 
-        flags = 0
+        flags = ResolverFlags(0)
 
         for f in functions:
             if f.upper() in ResolverFlags._member_names_:
@@ -645,9 +657,6 @@ class Megacloud:
         arrays = [[""] * len(key) for _ in range(array_count)]
 
         key_dict = {i: char for i, char in enumerate(key)}
-
-        locale_compare = lambda c: (c[1].upper(), c[1].isupper())
-        # key_sorted = {i: char for i, char in sorted(key_dict.items(), key=locale_compare)}
         key_sorted = {i: char for i, char in sorted(key_dict.items(), key=lambda p: p[1])}
 
         p = 0
@@ -692,16 +701,9 @@ class Megacloud:
         return self._shuffle_sources(new_sources, key)
 
     async def _extract_client_key(self) -> str:
-        # return "cNdO8Wdzo37owK7m766AWPgDlpnpNe9Dh3DBJg6TNAQKrdvT"
-
         resp = await make_request(self.embed_url, self.headers, {}, lambda r: r.text())
-
-        try:
-            meta_parts = filter(None, _re(Patterns.CLIENT_KEY, resp).groups())
-            return "".join(meta_parts)
-
-        except ValueError:
-            raise
+        meta_parts = filter(None, _re(Patterns.CLIENT_KEY, resp).groups())
+        return "".join(meta_parts)
 
     async def _extract_secret_key(self) -> str:
         script_url = f"{self.base_url}/js/player/a/v3/pro/embed-1.min.js"
@@ -733,10 +735,10 @@ class Megacloud:
 
     def _decrypt_sources(self, secret_key: str, client_key: str, sources: str) -> dict:
         sources_list = list(base64.b64decode(sources).decode())
-        key_mod = KeyModifier(secret_key, client_key)
+        key_transform = KeyTransform(secret_key, client_key, self.script)
 
-        for _ in key_mod:
-            modified_key = key_mod.apply()
+        for _ in key_transform:
+            modified_key = key_transform.apply()
 
             sources_list = self._process_sources(sources_list, modified_key)
             shuffled_key = self._shuffle_key(modified_key)
@@ -757,7 +759,6 @@ class Megacloud:
         resp = await make_request(get_src_url, self.headers, {"id": id, "_k": client_key}, lambda i: i.json())
 
         secret_key = await self._extract_secret_key()
-
         sources = self._decrypt_sources(secret_key, client_key, resp["sources"])
 
         resp["sources"] = sources
@@ -769,7 +770,7 @@ class Megacloud:
 
 
 async def main():
-    m = Megacloud("https://megacloud.blog/embed-2/v3/e-1/pkpZzfTrd8m8?k=1&autoPlay=1&oa=0&asi=1")
+    m = Megacloud("https://megacloud.blog/embed-2/v3/e-1/zJtRSz9OKGkv?k=1&autoPlay=1&oa=0&asi=1")
     print(await m.extract())
 
 
