@@ -9,6 +9,7 @@ A MC API for extracting streaming sources from MC by file ID.
 - aiohttp
 - fastapi
 - uvicorn
+- httpx
 
 ## Installation
 
@@ -20,7 +21,7 @@ A MC API for extracting streaming sources from MC by file ID.
 
 3. Install dependencies
 
-       pip install fastapi uvicorn aiohttp
+       pip install fastapi uvicorn aiohttp httpx
 
 ## Usage
 
@@ -29,18 +30,25 @@ To run the server, simply execute:
     clear && python -m uvicorn app:app --host 0.0.0.0 --port 8446
 
 By default, Server will the API at http://127.0.0.1:8446.
+The node list starts with this local address so distribution works without extra configuration.
 
-## API Endpoint
+## API Endpoints
 
     GET /api?id=<file_id>&version=<version>
+    GET /distribute?id=<file_id>&version=<version>
+    GET /nodes
+    POST /nodes?url=<node_url>
+    DELETE /nodes?url=<node_url>
 
-## Example:
+## Examples:
 
     GET http://127.0.0.1:8446/api?id=XXXXXX&version=XX
+    GET http://127.0.0.1:8446/distribute?id=XXXXXX&version=XX
 
 ## Response:
 
     Returns a JSON with the extracted video sources and additional metadata.
+    `/distribute` responses also include the node address that processed the request.
 
 # Running the Project with Python 3.11
 
@@ -54,7 +62,7 @@ By default, Server will the API at http://127.0.0.1:8446.
 
 3. Install the project dependencies:
 
-       pip install fastapi uvicorn aiohttp
+       pip install fastapi uvicorn aiohttp httpx
 
 4. Run the project:
 

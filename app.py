@@ -1,7 +1,9 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from megacloud import Megacloud
+import httpx
+from typing import List
 
 app = FastAPI()
 
@@ -11,6 +13,49 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+DEFAULT_NODE = "http://localhost:8446"
+nodes: List[str] = [DEFAULT_NODE]
+_node_index = 0
+
+@app.get("/nodes")
+async def list_nodes():
+    return {"nodes": nodes}
+
+@app.post("/nodes")
+async def add_node(url: str):
+    if url not in nodes:
+        nodes.append(url)
+    return {"nodes": nodes}
+
+@app.delete("/nodes")
+async def remove_node(url: str):
+    try:
+        nodes.remove(url)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Node not found")
+    return {"nodes": nodes}
+
+@app.get("/distribute")
+async def distribute(id: str, version: str):
+    if not nodes:
+        raise HTTPException(status_code=503, detail="No nodes configured")
+    global _node_index
+    url = nodes[_node_index % len(nodes)]
+    _node_index += 1
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{url}/api", params={"id": id, "version": version})
+            data = resp.json()
+            content = {"node": url}
+            if isinstance(data, dict):
+                content.update(data)
+            else:
+                content["response"] = data
+            return JSONResponse(content=content, status_code=resp.status_code)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api")
 async def api(id: str, version: str):
