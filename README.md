@@ -72,9 +72,9 @@ The node list starts with this local address so distribution works without extra
 
        deactivate
 
-# Running Flask Server in Background (Linux)
+# Running Server in Background (Linux)
 
-To run your Flask server in the background and keep it running after closing the terminal, use the following commands:
+To run your server in the background and keep it running after closing the terminal, use the following commands:
 
 1. Start the Server in Background
 
