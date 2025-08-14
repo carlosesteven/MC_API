@@ -14,7 +14,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-nodes: List[str] = []
+DEFAULT_NODE = "http://localhost:8446"
+nodes: List[str] = [DEFAULT_NODE]
 _node_index = 0
 
 @app.get("/nodes")
