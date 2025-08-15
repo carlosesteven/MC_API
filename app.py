@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from megacloud import Megacloud
 import httpx
 from typing import List
@@ -66,3 +67,35 @@ async def api(id: str, version: str):
         return JSONResponse(content=data)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>MC_API - CSC LAB</title>
+        <style>
+            body {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                font-family: Arial, sans-serif;
+                background-color: #333;
+                text-align: center;
+            }
+            h1 {
+                color: #f0f0f0;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>MC_API<br><br>CSC LAB</h1>
+    </body>
+    </html>
+    """
+    return html_content
