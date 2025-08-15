@@ -774,12 +774,31 @@ class Megacloud:
         client_key = await self._extract_client_key()
         resp = await make_request(get_src_url, self.headers, {"id": id, "_k": client_key}, lambda i: i.json())
 
-        secret_key = await self._extract_secret_key()
-        sources = self._decrypt_sources(secret_key, client_key, resp["sources"])
+        sources_raw = resp.get("sources")
+        need_decrypt = True
+
+        # 1) Si el backend lo marca como NO encriptado → no desencriptar
+        if resp.get("encrypted") is False:
+            need_decrypt = False
+
+        # 2) Si ya es una lista/dict con URL http(s) → no desencriptar
+        elif isinstance(sources_raw, list) and sources_raw and isinstance(sources_raw[0], dict) \
+            and "file" in sources_raw[0] and str(sources_raw[0]["file"]).startswith(("http://", "https://")):
+            need_decrypt = False
+        elif isinstance(sources_raw, dict) and "file" in sources_raw \
+            and str(sources_raw["file"]).startswith(("http://", "https://")):
+            need_decrypt = False
+
+        if need_decrypt:
+            secret_key = await self._extract_secret_key()
+            sources = self._decrypt_sources(secret_key, client_key, sources_raw)
+        else:
+            sources = sources_raw
 
         resp["sources"] = sources
 
-        resp["intro"] = resp["intro"]["start"], resp["intro"]["end"]
-        resp["outro"] = resp["outro"]["start"], resp["outro"]["end"]
+        # tu normalización original
+        resp["intro"] = (resp["intro"]["start"], resp["intro"]["end"])
+        resp["outro"] = (resp["outro"]["start"], resp["outro"]["end"])
 
         return resp
