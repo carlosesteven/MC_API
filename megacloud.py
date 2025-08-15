@@ -777,11 +777,11 @@ class Megacloud:
         sources_raw = resp.get("sources")
         need_decrypt = True
 
-        # 1) Si el backend lo marca como NO encriptado → no desencriptar
+        # 1) If backend explicitly marks as not encrypted → skip decryption
         if resp.get("encrypted") is False:
             need_decrypt = False
 
-        # 2) Si ya es una lista/dict con URL http(s) → no desencriptar
+        # 2) If it's already a list/dict containing a direct http(s) URL → skip decryption
         elif isinstance(sources_raw, list) and sources_raw and isinstance(sources_raw[0], dict) \
             and "file" in sources_raw[0] and str(sources_raw[0]["file"]).startswith(("http://", "https://")):
             need_decrypt = False
@@ -797,7 +797,7 @@ class Megacloud:
 
         resp["sources"] = sources
 
-        # tu normalización original
+        # Keep your original normalization
         resp["intro"] = (resp["intro"]["start"], resp["intro"]["end"])
         resp["outro"] = (resp["outro"]["start"], resp["outro"]["end"])
 
