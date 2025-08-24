@@ -50,6 +50,28 @@ The node list starts with this local address so distribution works without extra
     Returns a JSON with the extracted video sources and additional metadata.
     `/distribute` responses also include the node address that processed the request.
 
+# Installing Python 3.11 on Ubuntu Server
+
+1. Update package lists:
+
+       sudo apt update
+
+2. Install prerequisites:
+
+       sudo apt install software-properties-common -y
+
+3. Add the deadsnakes PPA:
+
+       sudo add-apt-repository ppa:deadsnakes/ppa -y
+
+4. Install Python 3.11 and related packages:
+
+       sudo apt install python3.11 python3.11-venv python3.11-dev -y
+
+5. Verify the installation:
+
+       python3.11 --version
+
 # Running the Project with Python 3.11
 
 1. Create a virtual environment with Python 3.11:
