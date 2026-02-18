@@ -466,15 +466,17 @@ class KeyTransform:
 
 class Megacloud:
     base_url = "https://megacloud.blog"
+    version_JS = "v3"
     headers = {
-        "user-agent": "Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
         "origin": base_url,
         "referer": base_url + "/",
     }
-    BIGINT_NUMBERS = False
+    BIGINT_NUMBERS = False    
 
-    def __init__(self, embed_url: str) -> None:
+    def __init__(self, embed_url: str, version: str = None) -> None:
         self.embed_url = embed_url
+        self.version_JS = version
 
         self.script: str
         self.string_array: list[str]
@@ -716,7 +718,10 @@ class Megacloud:
             except FileNotFoundError:
                 pass
 
-        script_url = f"{self.base_url}/js/player/a/v3/pro/embed-1.min.js"
+        script_url = f"{self.base_url}/js/player/a/{self.version_JS}/pro/embed-1.min.js"
+
+        print(f"\n- Script: {script_url}\n")
+
         self.script = await make_request(script_url, {}, {"v": int(time.time())}, lambda i: i.text())
 
         with open(self.script_cache_path, "w") as f:
@@ -769,13 +774,20 @@ class Megacloud:
 
     async def extract(self) -> dict:
         id = _re(Patterns.SOURCE_ID, self.embed_url).group(1)
-        get_src_url = f"{self.base_url}/embed-2/v3/e-1/getSources"
+
+        get_src_url = f"{self.base_url}/embed-2/{self.version_JS}/e-1/getSources"
 
         client_key = await self._extract_client_key()
+
+        print(f"- Client key: {client_key}\n")
+
         resp = await make_request(get_src_url, self.headers, {"id": id, "_k": client_key}, lambda i: i.json())
 
         sources_raw = resp.get("sources")
+
         need_decrypt = True
+
+        print(f"- Response: {resp}\n")
 
         # 1) If backend explicitly marks as not encrypted → skip decryption
         if resp.get("encrypted") is False:

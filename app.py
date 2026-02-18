@@ -45,7 +45,7 @@ async def distribute(id: str, version: str):
     url = nodes[_node_index % len(nodes)]
     _node_index += 1
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)) as client:
             resp = await client.get(f"{url}/api", params={"id": id, "version": version})
             data = resp.json()
             content = {"node": url}
@@ -61,7 +61,10 @@ async def distribute(id: str, version: str):
 @app.get("/api")
 async def api(id: str, version: str):
     url = f"https://megacloud.blog/embed-2/{version}/e-1/{id}?k=1&autoPlay=1&oa=0&asi=1"
-    m = Megacloud(url)
+
+    print(f"\n- Request ID: {id}\n- Version: {version}\n- URL: {url}\n")
+
+    m = Megacloud(url, version)
     try:
         data = await m.extract()
         return JSONResponse(content=data)
