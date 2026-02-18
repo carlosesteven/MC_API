@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from megacloud import Megacloud
+from mc import MC
 import httpx
 from typing import List
 
@@ -16,7 +16,9 @@ app.add_middleware(
 )
 
 DEFAULT_NODE = "http://localhost:8446"
+
 nodes: List[str] = [DEFAULT_NODE]
+
 _node_index = 0
 
 @app.get("/nodes")
@@ -64,7 +66,7 @@ async def api(id: str, version: str):
 
     print(f"\n- Request ID: {id}\n- Version: {version}\n- URL: {url}\n")
 
-    m = Megacloud(url, version)
+    m = MC(url, version)
     try:
         data = await m.extract()
         return JSONResponse(content=data)

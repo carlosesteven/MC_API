@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import time
 import json
@@ -180,14 +179,14 @@ class Patterns(StrEnum):
 
 class KeyResolver:
     @staticmethod
-    def _get_key(s: "Megacloud") -> str:
+    def _get_key(s: "MC") -> str:
         fcall = _re(Patterns.KEY_VAR, s.script).group(1)
         args = _re(Patterns.GET, fcall).groups()
 
         return s._get(args[1:], fcall).replace("-", "")
 
     @staticmethod
-    def _get_keys(s: "Megacloud") -> list[str]:
+    def _get_keys(s: "MC") -> list[str]:
         array_items = _re(Patterns.ARRAY_CONTENT, s.script, all=True)[0]
         array_items = arr_split(array_items)
         keys = []
@@ -202,7 +201,7 @@ class KeyResolver:
         return keys
 
     @staticmethod
-    def _get_indexes(s: "Megacloud") -> list[int]:
+    def _get_indexes(s: "MC") -> list[int]:
         array_items = _re(Patterns.ARRAY_CONTENT, s.script, all=True)[-1]
         array_items: list[str] = arr_split(array_items)
         ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
@@ -229,7 +228,7 @@ class KeyResolver:
         return indexes
 
     @classmethod
-    def map(cls, s: "Megacloud") -> _KeyPair:
+    def map(cls, s: "MC") -> _KeyPair:
         try:
             keys = cls._get_keys(s)
         except ValueError:
@@ -243,7 +242,7 @@ class KeyResolver:
         return keys, indexes
 
     @classmethod
-    def slice(cls, s: "Megacloud") -> _KeyPair:
+    def slice(cls, s: "MC") -> _KeyPair:
         key = cls._get_key(s)
 
         if any(c not in HEXDIGITS for c in key):
@@ -252,7 +251,7 @@ class KeyResolver:
         return list(key), list(range(0, len(key)))
 
     @classmethod
-    def abc(cls, s: "Megacloud") -> _KeyPair:
+    def abc(cls, s: "MC") -> _KeyPair:
         values = {}
         ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
 
@@ -284,7 +283,7 @@ class KeyResolver:
         return list(key), list(range(0, len(key)))
 
     @classmethod
-    def add_funcs(cls, s: "Megacloud") -> _KeyPair:
+    def add_funcs(cls, s: "MC") -> _KeyPair:
         ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
         funcs = _re(Patterns.GET_KEY_FUNC, ctx, all=True)
 
@@ -302,7 +301,7 @@ class KeyResolver:
         return list(key), list(range(0, len(key)))
 
     @classmethod
-    def from_charcode(cls, s: "Megacloud", keys: list = [], indexes: list = []) -> _KeyPair:
+    def from_charcode(cls, s: "MC", keys: list = [], indexes: list = []) -> _KeyPair:
         raw_values = []
         ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
 
@@ -337,7 +336,7 @@ class KeyResolver:
         return [chr(v) for v in raw_values], list(range(0, len(raw_values)))
 
     @classmethod
-    def compute_strings(cls, s: "Megacloud") -> _KeyPair:
+    def compute_strings(cls, s: "MC") -> _KeyPair:
         ctx = _re(Patterns.GET_KEY_CTX, s.script).group(1)
         ret = _re(Patterns.GET_KEY_FUNC_RETURN, ctx).group(1)
 
@@ -367,7 +366,7 @@ class KeyResolver:
         return list(key), list(range(0, len(key)))
 
     @classmethod
-    def fallback(cls, s: "Megacloud", keys: list, indexes: list) -> _KeyPair:
+    def fallback(cls, s: "MC", keys: list, indexes: list) -> _KeyPair:
         def _map(_) -> _KeyPair:
             if keys and indexes:
                 key = "".join(keys[i] for i in indexes)
@@ -391,7 +390,7 @@ class KeyResolver:
         return [], []
 
     @classmethod
-    def resolve(cls, flags: ResolverFlags, s: "Megacloud") -> str:
+    def resolve(cls, flags: ResolverFlags, s: "MC") -> str:
         key = ""
         keys, indexes = cls.map(s)
 
@@ -464,7 +463,7 @@ class KeyTransform:
         return "".join(result)
 
 
-class Megacloud:
+class MC:
     base_url = "https://megacloud.blog"
     version_JS = "v3"
     headers = {
