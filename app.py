@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from datetime import datetime, timezone
 from mc import MC
 import httpx
 from typing import List
@@ -72,6 +73,16 @@ async def api(id: str, version: str):
         return JSONResponse(content=data)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "service": "mc_api",
+        "nodes_count": len(nodes),
+        "default_node": DEFAULT_NODE,
+        "time": datetime.now(timezone.utc).isoformat(),
+    }
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
